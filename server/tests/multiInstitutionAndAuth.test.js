@@ -12,6 +12,8 @@
  */
 
 import bcrypt from 'bcrypt';
+import fs from 'fs';
+import path from 'path';
 import { getInstitutionConfig } from '../../src/config/institutionConfig.js';
 import { generateSecureTemporaryPassword } from '../utils/passwordGenerator.js';
 import User from '../models/User.js';
@@ -192,3 +194,37 @@ describe('5. Educator Authorization & Tenant Boundary Logic', () => {
     expect(isAuthorized).toBe(true);
   });
 });
+
+describe('6. EdWth LMS Brand Identity & Public Asset Integrity', () => {
+  it('should verify official logo and favicon assets exist in public directory', () => {
+    const publicDir = path.resolve(process.cwd(), 'public');
+    expect(fs.existsSync(path.join(publicDir, 'logo.png'))).toBe(true);
+    expect(fs.existsSync(path.join(publicDir, 'logo-transparent.png'))).toBe(true);
+    expect(fs.existsSync(path.join(publicDir, 'favicon.svg'))).toBe(true);
+
+    const logoStats = fs.statSync(path.join(publicDir, 'logo-transparent.png'));
+    expect(logoStats.size).toBeGreaterThan(1000);
+  });
+
+  it('should verify login view components render EdWth LMS branding and tagline', () => {
+    const unauthPath = path.resolve(process.cwd(), 'src/components/UnauthenticatedView.jsx');
+    const loginModalPath = path.resolve(process.cwd(), 'src/components/LoginModal.jsx');
+
+    const unauthContent = fs.readFileSync(unauthPath, 'utf8');
+    const modalContent = fs.readFileSync(loginModalPath, 'utf8');
+
+    // Verify brand strings
+    expect(unauthContent).toContain('EdWth LMS');
+    expect(unauthContent).toContain('EdWth Academy');
+    expect(unauthContent).toContain('Empowering Every Learner');
+    expect(unauthContent).toContain('/logo-transparent.png');
+    expect(unauthContent).not.toContain('Learning, simplified.');
+
+    expect(modalContent).toContain('EdWth LMS');
+    expect(modalContent).toContain('EdWth Academy');
+    expect(modalContent).toContain('Empowering Every Learner');
+    expect(modalContent).toContain('/logo-transparent.png');
+    expect(modalContent).not.toContain('Learning, simplified.');
+  });
+});
+

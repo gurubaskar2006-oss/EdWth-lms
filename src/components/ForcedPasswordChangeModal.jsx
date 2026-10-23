@@ -55,14 +55,14 @@ export const ForcedPasswordChangeModal = ({ isOpen }) => {
         backgroundColor: 'var(--bg-card, #0f172a)',
         borderRadius: '16px',
         border: '1px solid rgba(255, 255, 255, 0.1)',
-        boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.6), 0 0 40px rgba(5, 150, 105, 0.15)',
+        boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.6), 0 0 40px rgba(245, 130, 18, 0.2)',
         overflow: 'hidden',
         color: '#f8fafc'
       }}>
         {/* Banner Header */}
         <div style={{
           padding: '2rem 2rem 1.5rem',
-          background: 'linear-gradient(135deg, rgba(5, 150, 105, 0.2) 0%, rgba(37, 99, 235, 0.15) 100%)',
+          background: 'linear-gradient(135deg, rgba(245, 130, 18, 0.2) 0%, rgba(255, 178, 26, 0.12) 100%)',
           borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
           textAlign: 'center'
         }}>
@@ -70,11 +70,11 @@ export const ForcedPasswordChangeModal = ({ isOpen }) => {
             width: '54px',
             height: '54px',
             borderRadius: '14px',
-            background: 'linear-gradient(135deg, #059669 0%, #10b981 100%)',
+            background: 'linear-gradient(135deg, #F58212 0%, #FFB21A 100%)',
             display: 'inline-flex',
             alignItems: 'center',
             justifyContent: 'center',
-            boxShadow: '0 10px 20px -5px rgba(5, 150, 105, 0.4)',
+            boxShadow: '0 10px 20px -5px rgba(245, 130, 18, 0.45)',
             marginBottom: '1rem'
           }}>
             <KeyRound size={26} color="#ffffff" />
@@ -203,13 +203,13 @@ export const ForcedPasswordChangeModal = ({ isOpen }) => {
                 borderRadius: '9px',
                 border: 'none',
                 background: isValid
-                  ? 'linear-gradient(135deg, #059669 0%, #10b981 100%)'
+                  ? 'linear-gradient(135deg, #F58212 0%, #FFB21A 100%)'
                   : 'rgba(255, 255, 255, 0.08)',
                 color: isValid ? '#ffffff' : '#64748b',
                 fontWeight: 700,
                 fontSize: '0.9rem',
                 cursor: isValid && !loading ? 'pointer' : 'not-allowed',
-                boxShadow: isValid ? '0 10px 25px -5px rgba(5, 150, 105, 0.35)' : 'none',
+                boxShadow: isValid ? '0 10px 25px -5px rgba(245, 130, 18, 0.35)' : 'none',
                 transition: 'all 0.15s ease'
               }}
             >

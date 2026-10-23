@@ -202,37 +202,66 @@ export const LoginModal = ({ isOpen, onClose }) => {
               display: 'inline-flex',
               alignItems: 'center',
               justifyContent: 'center',
-              width: '48px',
-              height: '48px',
+              width: '54px',
+              height: '54px',
               borderRadius: '14px',
-              backgroundColor: '#059669',
-              color: '#FFFFFF',
-              boxShadow: '0 6px 16px -3px rgba(5, 150, 105, 0.35)',
-              marginBottom: '0.75rem'
+              backgroundColor: '#171717',
+              border: '1.5px solid rgba(245, 130, 18, 0.45)',
+              boxShadow: '0 6px 18px -3px rgba(245, 130, 18, 0.35)',
+              marginBottom: '0.75rem',
+              padding: '6px',
+              overflow: 'hidden'
             }}
           >
-            <GraduationCap size={26} />
+            <img
+              src="/logo-transparent.png"
+              alt="EdWth Academy"
+              style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+              onError={(e) => {
+                e.currentTarget.style.display = 'none';
+                if (e.currentTarget.parentElement) {
+                  e.currentTarget.parentElement.innerHTML = '<span style="font-size:1.3rem;font-weight:900;color:#F58212;">E</span>';
+                }
+              }}
+            />
           </div>
           <h2
             style={{
-              fontSize: '1.5rem',
+              fontSize: '1.55rem',
               fontWeight: 800,
               color: 'var(--text-primary)',
               letterSpacing: '-0.02em',
               margin: 0
             }}
           >
-            Lumina LMS
+            EdWth LMS
           </h2>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.4rem', marginTop: '0.25rem' }}>
+            <span
+              style={{
+                fontSize: '0.7rem',
+                fontWeight: 700,
+                letterSpacing: '0.06em',
+                textTransform: 'uppercase',
+                color: '#F58212',
+                backgroundColor: 'rgba(245, 130, 18, 0.12)',
+                padding: '0.1rem 0.45rem',
+                borderRadius: '9999px',
+                border: '1px solid rgba(245, 130, 18, 0.25)'
+              }}
+            >
+              EdWth Academy
+            </span>
+          </div>
           <p
             style={{
               fontSize: '0.86rem',
               color: 'var(--text-secondary)',
-              marginTop: '0.25rem',
+              marginTop: '0.35rem',
               fontWeight: 500
             }}
           >
-            Learning, simplified.
+            Empowering Every Learner
           </p>
         </div>
 
@@ -321,7 +350,7 @@ export const LoginModal = ({ isOpen, onClose }) => {
                     border: 'none',
                     padding: 0,
                     fontSize: '0.78rem',
-                    color: '#059669',
+                    color: '#F58212',
                     fontWeight: 600,
                     cursor: 'pointer'
                   }}
@@ -394,7 +423,7 @@ export const LoginModal = ({ isOpen, onClose }) => {
                   type="checkbox"
                   checked={rememberMe}
                   onChange={(e) => setRememberMe(e.target.checked)}
-                  style={{ accentColor: '#059669' }}
+                  style={{ accentColor: '#F58212' }}
                 />
                 <span>Remember me on this device</span>
               </label>
@@ -410,8 +439,9 @@ export const LoginModal = ({ isOpen, onClose }) => {
                 fontSize: '0.92rem',
                 fontWeight: 700,
                 borderRadius: '10px',
-                backgroundColor: '#059669',
-                borderColor: '#059669',
+                backgroundColor: '#F58212',
+                borderColor: '#F58212',
+                boxShadow: '0 4px 14px rgba(245, 130, 18, 0.3)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
@@ -450,8 +480,8 @@ export const LoginModal = ({ isOpen, onClose }) => {
                   width: '42px',
                   height: '42px',
                   borderRadius: '12px',
-                  backgroundColor: 'rgba(5, 150, 105, 0.1)',
-                  color: '#059669',
+                  backgroundColor: 'rgba(245, 130, 18, 0.12)',
+                  color: '#F58212',
                   display: 'inline-flex',
                   alignItems: 'center',
                   justifyContent: 'center',
@@ -512,8 +542,9 @@ export const LoginModal = ({ isOpen, onClose }) => {
                   padding: '0.7rem',
                   fontSize: '0.88rem',
                   fontWeight: 700,
-                  backgroundColor: '#059669',
-                  borderColor: '#059669',
+                  backgroundColor: '#F58212',
+                  borderColor: '#F58212',
+                  boxShadow: '0 4px 14px rgba(245, 130, 18, 0.3)',
                   opacity: isVerifying2FA || totpToken.length < 6 ? 0.6 : 1
                 }}
               >
@@ -632,8 +663,8 @@ export const LoginModal = ({ isOpen, onClose }) => {
                     width: '36px',
                     height: '36px',
                     borderRadius: '10px',
-                    backgroundColor: 'rgba(5, 150, 105, 0.1)',
-                    color: '#059669',
+                    backgroundColor: 'rgba(245, 130, 18, 0.12)',
+                    color: '#F58212',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center'
@@ -686,7 +717,7 @@ export const LoginModal = ({ isOpen, onClose }) => {
                 type="button"
                 onClick={() => setShowHelpModal(false)}
                 className="btn-primary"
-                style={{ backgroundColor: '#059669', borderColor: '#059669', padding: '0.5rem 1.25rem', fontSize: '0.84rem' }}
+                style={{ backgroundColor: '#F58212', borderColor: '#F58212', padding: '0.5rem 1.25rem', fontSize: '0.84rem' }}
               >
                 Understood
               </button>

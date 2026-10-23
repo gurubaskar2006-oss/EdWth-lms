@@ -177,7 +177,7 @@ export const UnauthenticatedView = ({ portalName }) => {
         minHeight: '100vh',
         backgroundColor: 'var(--bg-main)',
         padding: '2rem 1rem',
-        backgroundImage: 'radial-gradient(ellipse at 50% 0%, rgba(5, 150, 105, 0.05) 0%, transparent 60%)'
+        backgroundImage: 'radial-gradient(ellipse at 50% 0%, rgba(245, 130, 18, 0.08) 0%, transparent 65%)'
       }}
     >
       {/* Brand Header */}
@@ -187,37 +187,81 @@ export const UnauthenticatedView = ({ portalName }) => {
             display: 'inline-flex',
             alignItems: 'center',
             justifyContent: 'center',
-            width: '56px',
-            height: '56px',
+            width: '64px',
+            height: '64px',
             borderRadius: '16px',
-            backgroundColor: '#059669',
-            color: '#FFFFFF',
-            boxShadow: '0 8px 20px -4px rgba(5, 150, 105, 0.35)',
-            marginBottom: '1rem'
+            backgroundColor: '#171717',
+            border: '1.5px solid rgba(245, 130, 18, 0.45)',
+            boxShadow: '0 8px 24px -4px rgba(245, 130, 18, 0.35)',
+            marginBottom: '1rem',
+            padding: '8px',
+            overflow: 'hidden'
           }}
         >
-          <GraduationCap size={32} />
+          <img
+            src="/logo-transparent.png"
+            alt="EdWth Academy"
+            style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+            onError={(e) => {
+              e.currentTarget.style.display = 'none';
+              if (e.currentTarget.parentElement) {
+                e.currentTarget.parentElement.innerHTML = '<span style="font-size:1.5rem;font-weight:900;color:#F58212;">E</span>';
+              }
+            }}
+          />
         </div>
         <h1
           style={{
-            fontSize: '1.9rem',
+            fontSize: '2rem',
             fontWeight: 800,
             color: 'var(--text-primary)',
             letterSpacing: '-0.025em',
             margin: 0
           }}
         >
-          Lumina LMS
+          EdWth LMS
         </h1>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', marginTop: '0.35rem' }}>
+          <span
+            style={{
+              fontSize: '0.74rem',
+              fontWeight: 700,
+              letterSpacing: '0.06em',
+              textTransform: 'uppercase',
+              color: '#F58212',
+              backgroundColor: 'rgba(245, 130, 18, 0.12)',
+              padding: '0.15rem 0.55rem',
+              borderRadius: '9999px',
+              border: '1px solid rgba(245, 130, 18, 0.25)'
+            }}
+          >
+            EdWth Academy
+          </span>
+          {portalName && (
+            <span
+              style={{
+                fontSize: '0.74rem',
+                fontWeight: 600,
+                color: 'var(--text-secondary)',
+                backgroundColor: 'var(--bg-surface-subtle)',
+                padding: '0.15rem 0.55rem',
+                borderRadius: '9999px',
+                border: '1px solid var(--border-default)'
+              }}
+            >
+              {portalName}
+            </span>
+          )}
+        </div>
         <p
           style={{
             fontSize: '0.95rem',
             color: 'var(--text-secondary)',
-            marginTop: '0.35rem',
+            marginTop: '0.45rem',
             fontWeight: 500
           }}
         >
-          Learning, simplified.
+          Empowering Every Learner
         </p>
       </div>
 
@@ -454,7 +498,7 @@ export const UnauthenticatedView = ({ portalName }) => {
                 alignItems: 'center',
                 justifyContent: 'center',
                 gap: '0.5rem',
-                boxShadow: '0 2px 6px rgba(5, 150, 105, 0.25)',
+                boxShadow: '0 4px 14px rgba(245, 130, 18, 0.3)',
                 opacity: isSubmitting ? 0.75 : 1,
                 cursor: isSubmitting ? 'not-allowed' : 'pointer'
               }}
@@ -491,7 +535,7 @@ export const UnauthenticatedView = ({ portalName }) => {
                   width: '48px',
                   height: '48px',
                   borderRadius: '12px',
-                  backgroundColor: 'rgba(5, 150, 105, 0.1)',
+                  backgroundColor: 'rgba(245, 130, 18, 0.12)',
                   color: 'var(--accent-primary)',
                   display: 'inline-flex',
                   alignItems: 'center',
@@ -714,8 +758,8 @@ export const UnauthenticatedView = ({ portalName }) => {
           color: 'var(--text-muted)'
         }}
       >
-        <ShieldCheck size={15} color="var(--accent-primary)" />
-        <span>Enterprise Academic Security · 6th Civilians Corporation</span>
+        <ShieldCheck size={15} color="#F58212" />
+        <span>EdWth Academy • Enterprise Academic Security</span>
       </div>
 
       {/* Need Help Signing In Modal */}
@@ -755,8 +799,8 @@ export const UnauthenticatedView = ({ portalName }) => {
                     width: '36px',
                     height: '36px',
                     borderRadius: '10px',
-                    backgroundColor: 'rgba(37, 99, 235, 0.1)',
-                    color: '#2563EB',
+                    backgroundColor: 'rgba(245, 130, 18, 0.12)',
+                    color: '#F58212',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center'
@@ -780,7 +824,7 @@ export const UnauthenticatedView = ({ portalName }) => {
 
             <div style={{ fontSize: '0.86rem', color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: '1.25rem' }}>
               <p style={{ margin: '0 0 0.75rem 0' }}>
-                To safeguard student records and institutional security, Lumina LMS does not provide public, unauthenticated password reset links.
+                To safeguard student records and institutional security, EdWth LMS does not provide public, unauthenticated password reset links.
               </p>
               <div
                 style={{
