@@ -10,6 +10,9 @@ const getRedisConfig = () => {
   if (process.env.REDIS_URL) {
     return process.env.REDIS_URL;
   }
+  if (!process.env.REDIS_HOST && process.env.NODE_ENV === 'production') {
+    return null;
+  }
   return {
     host: process.env.REDIS_HOST || '127.0.0.1',
     port: parseInt(process.env.REDIS_PORT || '6379', 10),
@@ -40,6 +43,10 @@ export const initRedis = async () => {
 
   try {
     const config = getRedisConfig();
+    if (!config) {
+      console.log('ℹ️ [Redis] No external Redis configured. Operating in single-instance mode with in-memory Socket.io adapter.');
+      return null;
+    }
     pubClient = new Redis(config);
     subClient = pubClient.duplicate();
 

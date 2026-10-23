@@ -30,7 +30,9 @@ export const validateProductionEnv = () => {
     missing.push('MONGO_URI');
   }
 
-  if (!process.env.REDIS_URL && !process.env.REDIS_HOST) {
+  // Redis is mandatory when horizontal multi-node scaling is explicitly requested (REQUIRE_REDIS=true).
+  // Single-instance cloud deployments (e.g. Render Web Service) safely utilize the native in-memory Socket.io adapter.
+  if (process.env.REQUIRE_REDIS === 'true' && !process.env.REDIS_URL && !process.env.REDIS_HOST) {
     missing.push('REDIS_URL (or REDIS_HOST/REDIS_PORT)');
   }
 
