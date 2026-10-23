@@ -1761,9 +1761,14 @@ export const TestsManagementView = () => {
     if (!testTitle.trim()) return;
 
     const targetClass = classesList.find((c) => (c.id || c._id) === scheduleBatchId);
+    const resolvedLang = testSubject.includes('SQL') ? 'sql' :
+      (testSubject.includes('C++') || testSubject.includes('cpp')) ? 'cpp' :
+      'python';
+
     const payload = {
       title: testTitle.trim(),
       subject: testSubject,
+      language: resolvedLang,
       date: testDate,
       time: testTime,
       room: testRoom,

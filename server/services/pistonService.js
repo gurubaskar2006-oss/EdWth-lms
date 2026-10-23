@@ -73,6 +73,47 @@ const truncateOutput = (str) => {
 };
 
 /**
+ * Execute C/C++ code inside isolated Wandbox container (GCC compiler)
+ */
+const executeWandboxCpp = async ({ code, stdin = '', timeoutMs = DEFAULT_TIMEOUT_MS }) => {
+  try {
+    const controller = new AbortController();
+    const timeoutHandle = setTimeout(() => controller.abort(), Math.min(timeoutMs + 4000, 15000));
+
+    const response = await fetch('https://wandbox.org/api/compile.json', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        compiler: 'gcc-head',
+        code: String(code || ''),
+        stdin: String(stdin || ''),
+        options: 'warning,gnu++20'
+      }),
+      signal: controller.signal
+    });
+
+    clearTimeout(timeoutHandle);
+
+    if (!response.ok) return null;
+    const data = await response.json();
+    const stdout = truncateOutput(data.program_output || '');
+    const stderr = truncateOutput(data.compiler_error || data.program_error || '');
+    const exitCode = Number(data.status ?? 0);
+    const rawOutput = stdout + (stderr ? (stdout ? '\n\n' : '') + stderr : '');
+
+    return {
+      stdout,
+      stderr,
+      output: truncateOutput(rawOutput),
+      code: exitCode,
+      signal: null
+    };
+  } catch (err) {
+    return null;
+  }
+};
+
+/**
  * Execute code inside isolated Piston sandbox container
  */
 export const executeIsolatedCode = async ({ language, files, stdin = '', runTimeout = DEFAULT_TIMEOUT_MS }) => {
@@ -164,9 +205,35 @@ export const executeIsolatedCode = async ({ language, files, stdin = '', runTime
     workerStatusCache.set(workerUrl, { isOnline: false, lastChecked: Date.now() });
 
     // =========================================================================
-    // PRODUCTION SECURITY ENFORCEMENT (FAIL-CLOSED)
+    // C++ CONTAINER SANDBOX FALLBACK (Wandbox isolated GCC runner)
     // =========================================================================
-    if (isProduction) {
+    const sampleCode = formattedFiles[0]?.content || '';
+    const lang = (runtime.language || '').toLowerCase();
+    const isCpp = lang === 'c++' || lang === 'cpp' || lang === 'c';
+
+    if (isCpp) {
+      const wandboxResult = await executeWandboxCpp({
+        code: sampleCode,
+        stdin,
+        timeoutMs: boundedTimeout
+      });
+
+      if (wandboxResult) {
+        return {
+          success: true,
+          data: {
+            language: runtime.language,
+            version: 'GCC 13+ (Isolated Sandbox)',
+            run: wandboxResult
+          }
+        };
+      }
+    }
+
+    // =========================================================================
+    // PRODUCTION SECURITY ENFORCEMENT (FAIL-CLOSED FOR UNCONTAINERIZED RUNTIMES)
+    // =========================================================================
+    if (isProduction && process.env.ALLOW_LOCAL_FALLBACK !== 'true') {
       return {
         success: false,
         status: 503,
@@ -180,8 +247,6 @@ export const executeIsolatedCode = async ({ language, files, stdin = '', runTime
     // =========================================================================
     // DEVELOPMENT ONLY: Local Execution Fallback
     // =========================================================================
-    const sampleCode = formattedFiles[0]?.content || '';
-    const lang = (runtime.language || '').toLowerCase();
     
     // Attempt local execution for supported system runtimes (Python, Node/JS, SQL)
     const localRun = await new Promise((resolve) => {
@@ -199,32 +264,45 @@ export const executeIsolatedCode = async ({ language, files, stdin = '', runTime
         cmd = 'python';
         args = [
           '-c',
-          `import sqlite3, sys
+          `import sqlite3, sys, json
 con = sqlite3.connect(':memory:')
 cur = con.cursor()
 script = sys.stdin.read()
-statements = [s.strip() for s in script.split(';') if s.strip()]
+is_json_mode = '.mode json' in script
+clean_script = script.replace('.mode json', '').strip()
+statements = [s.strip() for s in clean_script.split(';') if s.strip()]
+json_results = []
 for stmt in statements:
     try:
         cur.execute(stmt)
         if cur.description:
             cols = [d[0] for d in cur.description]
             rows = cur.fetchall()
-            col_widths = [max(len(str(val)) for val in [col] + [row[i] for row in rows]) for i, col in enumerate(cols)]
-            header = ' | '.join(col.ljust(col_widths[i]) for i, col in enumerate(cols))
-            sep = '-+-'.join('-' * col_widths[i] for i in range(len(cols)))
-            print(header)
-            print(sep)
-            for row in rows:
-                print(' | '.join(str(row[i]).ljust(col_widths[i]) for i in range(len(cols))))
-            print(f'({len(rows)} row{"s" if len(rows) != 1 else ""} returned)\\n')
+            if is_json_mode:
+                dict_rows = [dict(zip(cols, r)) for r in rows]
+                json_results.extend(dict_rows)
+            else:
+                col_widths = [max(len(str(val)) for val in [col] + [row[i] for row in rows]) for i, col in enumerate(cols)]
+                header = ' | '.join(col.ljust(col_widths[i]) for i, col in enumerate(cols))
+                sep = '-+-'.join('-' * col_widths[i] for i in range(len(cols)))
+                print(header)
+                print(sep)
+                for row in rows:
+                    print(' | '.join(str(row[i]).ljust(col_widths[i]) for i in range(len(cols))))
+                print(f'({len(rows)} row{"s" if len(rows) != 1 else ""} returned)\\n')
         else:
             con.commit()
             action = stmt.strip().split()[0].upper()
             if action in ('CREATE', 'INSERT', 'UPDATE', 'DELETE', 'DROP', 'ALTER'):
-                print(f'{action} OK. ({cur.rowcount if cur.rowcount >= 0 else 0} affected)')
+                if not is_json_mode:
+                    print(f'{action} OK. ({cur.rowcount if cur.rowcount >= 0 else 0} affected)')
     except Exception as e:
-        print(f'SQL Error: {e}')
+        if is_json_mode:
+            print(f'SQL Error: {e}')
+        else:
+            print(f'SQL Error: {e}')
+if is_json_mode and json_results:
+    print(json.dumps(json_results))
 `
         ];
       }

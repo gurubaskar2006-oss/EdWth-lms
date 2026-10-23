@@ -111,7 +111,7 @@ export const WelcomePortalView = () => {
               }}
             >
               <Building2 size={16} />
-              <span>{portalConfig?.companyName || 'Lumina Enterprise Platform'}</span>
+              <span>{portalConfig?.companyName || 'EdWth Academy'}</span>
             </div>
 
             <span
@@ -174,7 +174,7 @@ export const WelcomePortalView = () => {
               lineHeight: 1.3
             }}
           >
-            Welcome to the {portalConfig?.portalName || 'Lumina Student Learning Platform'}
+            Welcome to {portalConfig?.portalName || 'EdWth LMS Student Platform'}
           </div>
 
           <p
@@ -234,7 +234,7 @@ export const WelcomePortalView = () => {
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
           <div>
             <h3 style={{ fontSize: '1.25rem', color: 'var(--text-primary)', fontWeight: 800 }}>
-              {portalConfig?.companyName || 'Lumina Enterprise'} Academic Hub
+              {portalConfig?.companyName || 'EdWth Academy'} Academic Hub
             </h3>
             <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
               Direct access to classrooms, polyglot compiler labs, rosters, and GPA analytics

@@ -13,7 +13,7 @@ export const App = () => {
 
   const currentRole = (user?.role || '').toLowerCase();
   if (!isAuthenticated) {
-    return <UnauthenticatedView portalName="Lumina LMS" role="student" />;
+    return <UnauthenticatedView portalName="EdWth LMS" role="student" />;
   }
 
   // Server-authoritative role redirection

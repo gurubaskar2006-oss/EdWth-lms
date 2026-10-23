@@ -66,6 +66,29 @@ const assessmentSchema = new mongoose.Schema({
     type: String,
     default: ''
   },
+  language: {
+    type: String,
+    enum: ['python', 'cpp', 'c++', 'sql', 'mixed'],
+    default: 'python'
+  },
+  questions: [{
+    id: { type: String, required: true },
+    type: { type: String, enum: ['mcq', 'coding', 'sql', 'descriptive'], default: 'coding' },
+    title: { type: String, default: '' },
+    prompt: { type: String, required: true },
+    language: { type: String, default: 'python' },
+    options: [{ type: String }],
+    correctAnswer: { type: mongoose.Schema.Types.Mixed, default: null },
+    starterCode: { type: String, default: '' },
+    testCases: [{
+      id: { type: String, default: () => new mongoose.Types.ObjectId().toString() },
+      input: { type: String, default: '' },
+      expectedOutput: { type: String, default: '' },
+      isHidden: { type: Boolean, default: false },
+      marks: { type: Number, default: 5 }
+    }],
+    marks: { type: Number, default: 10 }
+  }],
   challenge: {
     type: mongoose.Schema.Types.Mixed,
     default: null

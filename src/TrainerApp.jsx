@@ -1254,27 +1254,29 @@ export const TrainerApp = () => {
       <aside className="sidebar">
         <div className="sidebar-header" style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
           <div style={{
-            width: '38px',
-            height: '38px',
+            width: '40px',
+            height: '40px',
             borderRadius: '10px',
-            backgroundColor: 'rgba(99, 102, 241, 0.12)',
-            border: '1px solid rgba(99, 102, 241, 0.3)',
+            backgroundColor: '#171717',
+            border: '1px solid rgba(245, 130, 18, 0.35)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            color: '#6366F1'
+            overflow: 'hidden',
+            padding: '4px',
+            boxShadow: '0 2px 8px rgba(0,0,0,0.2)'
           }}>
-            <Building2 size={20} />
+            <img src="/logo-transparent.png" alt="EdWth" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
           </div>
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-              <h2 style={{ color: 'var(--text-primary)', fontWeight: 800, fontSize: '0.95rem', margin: 0, letterSpacing: '0.03em' }}>LUMINA</h2>
-              <span style={{ fontSize: '0.62rem', padding: '0.1rem 0.35rem', borderRadius: '4px', backgroundColor: 'rgba(99, 102, 241, 0.15)', color: '#6366F1', fontWeight: 700 }}>
-                {terms?.educatorLabel?.toUpperCase() || 'TRAINER'}
+              <h2 style={{ color: 'var(--text-primary)', fontWeight: 800, fontSize: '0.95rem', margin: 0, letterSpacing: '0.03em' }}>EDWTH LMS</h2>
+              <span style={{ fontSize: '0.62rem', padding: '0.1rem 0.35rem', borderRadius: '4px', backgroundColor: 'rgba(245, 130, 18, 0.15)', color: '#F58212', fontWeight: 700 }}>
+                {terms?.educatorLabel?.toUpperCase() || 'EDUCATOR'}
               </span>
             </div>
             <div style={{ fontSize: '0.68rem', fontWeight: 600, color: 'var(--text-secondary)', marginTop: '1px' }}>
-              {terms?.portalSubtitle || 'Faculty Instruction'}
+              EdWth Academy • {terms?.portalSubtitle || 'Faculty Instruction'}
             </div>
           </div>
         </div>

@@ -1726,7 +1726,7 @@ router.post('/tests', async (req, res) => {
       });
     }
 
-    const { title, subject, date, time, room, totalMarks, durationMinutes, isCodingExam, batchId, className } = req.body;
+    const { title, subject, date, time, room, totalMarks, durationMinutes, isCodingExam, batchId, className, language, questions, challenge } = req.body;
     if (!title || !subject) {
       return res.status(400).json({ success: false, message: 'Title and subject are required' });
     }
@@ -1745,12 +1745,19 @@ router.post('/tests', async (req, res) => {
       targetClassName = bDoc.name;
     }
 
+    const resolvedLang = language || (
+      subject?.toLowerCase().includes('sql') ? 'sql' :
+      (subject?.toLowerCase().includes('c++') || subject?.toLowerCase().includes('cpp')) ? 'cpp' :
+      'python'
+    );
+
     const testId = `test-${Date.now()}`;
     const newExam = await Assessment.create({
       tenantId: req.tenantId,
       id: testId,
       title: title.trim(),
       subject: subject.trim(),
+      language: resolvedLang,
       batchId: targetBatchId,
       className: targetClassName,
       date: date ? new Date(date) : new Date(Date.now() + 2 * 86400000),
@@ -1759,6 +1766,8 @@ router.post('/tests', async (req, res) => {
       totalMarks: Number(totalMarks) || 20,
       durationMinutes: Number(durationMinutes) || 45,
       isCodingExam: isCodingExam ?? true,
+      questions: Array.isArray(questions) ? questions : [],
+      challenge: challenge || null,
       status: 'scheduled'
     });
 

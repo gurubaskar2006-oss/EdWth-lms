@@ -117,6 +117,24 @@ function __lms_run_tests() {
 }
 __lms_run_tests();
 `;
+  } else if (lang === 'cpp' || lang === 'c++') {
+    const testsCalls = testCases.map((tc) => {
+      const argsFormatted = (tc.args || []).map((a) => {
+        if (typeof a === 'string') return `"${a}"`;
+        if (typeof a === 'boolean') return a ? 'true' : 'false';
+        return String(a);
+      }).join(', ');
+      return `    try { std::cout << "{\\"actual\\": " << ${functionName}(${argsFormatted}) << "}"; } catch(...) { std::cout << "{\\"error\\": \\"C++ Exception\\"}"; }`;
+    }).join('\n    std::cout << ", ";\n');
+
+    testHarness = `
+int main() {
+    std::cout << "\\n___LMS_RESULT___\\n[";
+${testsCalls}
+    std::cout << "]\\n";
+    return 0;
+}
+`;
   } else {
     // Simulated assessment for unsupported test runner languages
     const simulatedResults = testCases.map(tc => ({

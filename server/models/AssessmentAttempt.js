@@ -69,6 +69,7 @@ const assessmentAttemptSchema = new mongoose.Schema({
     default: 'normal'
   },
   answers: [mongoose.Schema.Types.Mixed],
+  questionResults: [mongoose.Schema.Types.Mixed],
   teacherFeedback: String
 }, { timestamps: true });
 

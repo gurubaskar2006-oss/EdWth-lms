@@ -1090,27 +1090,38 @@ export const AdminApp = () => {
       <aside className="sidebar">
         <div className="sidebar-header" style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
           <div style={{
-            width: '38px',
-            height: '38px',
+            width: '40px',
+            height: '40px',
             borderRadius: '10px',
-            backgroundColor: 'rgba(245, 158, 11, 0.12)',
-            border: '1px solid rgba(245, 158, 11, 0.3)',
+            backgroundColor: '#171717',
+            border: '1px solid #FFB21A33',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            color: '#D97706'
+            boxShadow: '0 3px 10px rgba(245, 130, 18, 0.25)',
+            overflow: 'hidden',
+            flexShrink: 0
           }}>
-            <Shield size={20} />
+            <img
+              src="/logo-transparent.png"
+              alt="EdWth LMS"
+              onError={(e) => {
+                e.currentTarget.style.display = 'none';
+                if (e.currentTarget.nextSibling) e.currentTarget.nextSibling.style.display = 'block';
+              }}
+              style={{ width: '30px', height: '30px', objectFit: 'contain' }}
+            />
+            <Shield size={20} color="#F58212" style={{ display: 'none' }} />
           </div>
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-              <h2 style={{ color: 'var(--text-primary)', fontWeight: 800, fontSize: '0.95rem', margin: 0, letterSpacing: '0.03em' }}>LUMINA LMS</h2>
-              <span style={{ fontSize: '0.62rem', padding: '0.1rem 0.35rem', borderRadius: '4px', backgroundColor: isSuperAdmin ? 'rgba(99, 102, 241, 0.15)' : 'rgba(245, 158, 11, 0.15)', color: isSuperAdmin ? '#6366F1' : '#D97706', fontWeight: 700 }}>
+              <h2 style={{ color: 'var(--text-primary)', fontWeight: 800, fontSize: '0.95rem', margin: 0, letterSpacing: '0.03em' }}>EDWTH LMS</h2>
+              <span style={{ fontSize: '0.62rem', padding: '0.1rem 0.35rem', borderRadius: '4px', backgroundColor: isSuperAdmin ? 'rgba(245, 130, 18, 0.15)' : 'rgba(245, 158, 11, 0.15)', color: '#F58212', fontWeight: 700 }}>
                 {isSuperAdmin ? 'SUPER ADMIN' : 'INSTITUTION ADMIN'}
               </span>
             </div>
             <div style={{ fontSize: '0.68rem', fontWeight: 600, color: 'var(--text-secondary)', marginTop: '1px' }}>
-              {isSuperAdmin ? '6th Civilians Corporation' : (user?.tenantName || 'Institution Administration')}
+              {isSuperAdmin ? 'EdWth Academy' : (user?.tenantName || 'Institution Administration')}
             </div>
           </div>
         </div>

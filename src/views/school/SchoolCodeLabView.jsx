@@ -23,11 +23,39 @@ import {
   HelpCircle
 } from 'lucide-react';
 
-const EMPTY_STARTER_CODE = `# main.py
+export const LANGUAGE_OPTIONS = [
+  { id: 'python', label: 'Python 3.10', ext: 'main.py', monaco: 'python', iconColor: '#00E676' },
+  { id: 'cpp', label: 'C++ 20 (GCC)', ext: 'main.cpp', monaco: 'cpp', iconColor: '#38BDF8' },
+  { id: 'sql', label: 'SQL (SQLite)', ext: 'queries.sql', monaco: 'sql', iconColor: '#F58212' }
+];
+
+export const FREEFORM_STARTERS = {
+  python: `# main.py
 # Freeform Python 3.10 sandbox. Type arbitrary code here to experiment.
 
-print("Hello, Lumina Code Lab!")
-`;
+print("Hello, EdWth Code Lab!")
+`,
+  cpp: `// main.cpp
+// Freeform C++20 sandbox with GCC compiler
+#include <iostream>
+
+int main() {
+    std::cout << "Hello, EdWth Code Lab C++!" << std::endl;
+    return 0;
+}
+`,
+  sql: `-- queries.sql
+-- Freeform in-memory SQLite sandbox
+CREATE TABLE students (
+    id INTEGER PRIMARY KEY,
+    name TEXT,
+    subject TEXT
+);
+
+INSERT INTO students VALUES (1, 'Alex Vance', 'Computer Science'), (2, 'Maya Lin', 'AI Systems');
+SELECT * FROM students;
+`
+};
 
 export const GUIDED_EXERCISES = [
   {
@@ -166,6 +194,190 @@ print(f"'{test_2}' is palindrome:", is_palindrome(test_2))
   }
 ];
 
+export const MULTI_LANG_EXERCISES = {
+  python: GUIDED_EXERCISES,
+  cpp: [
+    {
+      id: 'cpp-1',
+      title: 'Vector Elements Summation',
+      topic: 'Vectors & Iteration',
+      difficulty: 'Beginner',
+      objective: 'Iterate over a std::vector of numbers and compute their sum.',
+      instructions: 'Iterate through the `numbers` vector, accumulate the sum into `total`, and print the result with std::cout.',
+      starterCode: `// C++ Exercise: Vector Elements Summation
+#include <iostream>
+#include <vector>
+
+int main() {
+    std::vector<int> numbers = {10, 25, 30, 45, 50};
+    int total = 0;
+
+    // TODO: Iterate through numbers and accumulate sum into total
+    for (int num : numbers) {
+        total += num;
+    }
+
+    std::cout << "Total Sum: " << total << std::endl;
+    return 0;
+}
+`,
+      hints: [
+        'Use range-based for loop: for (int num : numbers) { total += num; }',
+        'Print using std::cout << "Total Sum: " << total << std::endl;'
+      ],
+      solution: `#include <iostream>
+#include <vector>
+
+int main() {
+    std::vector<int> numbers = {10, 25, 30, 45, 50};
+    int total = 0;
+    for (int num : numbers) total += num;
+    std::cout << "Total Sum: " << total << std::endl;
+    return 0;
+}
+`
+    },
+    {
+      id: 'cpp-2',
+      title: 'Palindrome String Checker',
+      topic: 'Strings & Two Pointers',
+      difficulty: 'Intermediate',
+      objective: 'Check if a string is identical when read forward and backward.',
+      instructions: 'Complete the isPalindrome function using two pointers or character comparison.',
+      starterCode: `// C++ Exercise: Palindrome String Checker
+#include <iostream>
+#include <string>
+
+bool isPalindrome(const std::string& str) {
+    int left = 0;
+    int right = str.length() - 1;
+    // TODO: Compare characters from outside inwards
+    while (left < right) {
+        if (str[left] != str[right]) return false;
+        left++;
+        right--;
+    }
+    return true;
+}
+
+int main() {
+    std::string test = "racecar";
+    std::cout << test << " is palindrome: " << (isPalindrome(test) ? "YES" : "NO") << std::endl;
+    return 0;
+}
+`,
+      hints: [
+        'Compare str[left] with str[right]',
+        'Increment left and decrement right while left < right'
+      ],
+      solution: `#include <iostream>
+#include <string>
+
+bool isPalindrome(const std::string& str) {
+    int left = 0, right = str.length() - 1;
+    while (left < right) {
+        if (str[left] != str[right]) return false;
+        left++; right--;
+    }
+    return true;
+}
+
+int main() {
+    std::string test = "racecar";
+    std::cout << test << " is palindrome: " << (isPalindrome(test) ? "YES" : "NO") << std::endl;
+    return 0;
+}
+`
+    }
+  ],
+  sql: [
+    {
+      id: 'sql-1',
+      title: 'High-Scoring Students Filter',
+      topic: 'Filtering & Conditions',
+      difficulty: 'Beginner',
+      objective: 'Create a student marks table and query students with score >= 85.',
+      instructions: 'Query all students who scored 85 or above, ordered by score descending.',
+      starterCode: `-- SQL Exercise: Filter Top Students
+CREATE TABLE students (
+    id INTEGER PRIMARY KEY,
+    name TEXT,
+    subject TEXT,
+    score INTEGER
+);
+
+INSERT INTO students VALUES (1, 'Alex Vance', 'Algorithms', 92);
+INSERT INTO students VALUES (2, 'Maya Lin', 'Databases', 96);
+INSERT INTO students VALUES (3, 'Samir Patel', 'Operating Systems', 78);
+INSERT INTO students VALUES (4, 'Zoe Chen', 'Algorithms', 88);
+
+-- TODO: Write SELECT query for students with score >= 85 ordered by score DESC
+SELECT name, subject, score 
+FROM students 
+WHERE score >= 85 
+ORDER BY score DESC;
+`,
+      hints: [
+        'Use WHERE score >= 85 to filter records',
+        'Use ORDER BY score DESC to sort highest first'
+      ],
+      solution: `CREATE TABLE students (
+    id INTEGER PRIMARY KEY,
+    name TEXT,
+    subject TEXT,
+    score INTEGER
+);
+INSERT INTO students VALUES (1, 'Alex Vance', 'Algorithms', 92);
+INSERT INTO students VALUES (2, 'Maya Lin', 'Databases', 96);
+INSERT INTO students VALUES (3, 'Samir Patel', 'Operating Systems', 78);
+INSERT INTO students VALUES (4, 'Zoe Chen', 'Algorithms', 88);
+
+SELECT name, subject, score FROM students WHERE score >= 85 ORDER BY score DESC;
+`
+    },
+    {
+      id: 'sql-2',
+      title: 'Subject Enrollment Aggregation',
+      topic: 'GROUP BY & Aggregates',
+      difficulty: 'Intermediate',
+      objective: 'Calculate the total count of enrolled students and average score per subject.',
+      instructions: 'Use GROUP BY subject to aggregate COUNT(*) and AVG(score).',
+      starterCode: `-- SQL Exercise: Subject Enrollment Aggregation
+CREATE TABLE enrollments (
+    student_id INTEGER,
+    subject TEXT,
+    score INTEGER
+);
+
+INSERT INTO enrollments VALUES (101, 'Python Programming', 88);
+INSERT INTO enrollments VALUES (102, 'Python Programming', 94);
+INSERT INTO enrollments VALUES (103, 'C++ Data Structures', 76);
+INSERT INTO enrollments VALUES (104, 'C++ Data Structures', 84);
+INSERT INTO enrollments VALUES (105, 'SQL Databases', 90);
+
+-- TODO: Query subject, COUNT(*) as student_count, ROUND(AVG(score), 1) as avg_score
+SELECT subject, COUNT(*) as student_count, ROUND(AVG(score), 1) as avg_score
+FROM enrollments
+GROUP BY subject
+ORDER BY avg_score DESC;
+`,
+      hints: [
+        'Use GROUP BY subject',
+        'Use COUNT(*) to count students and AVG(score) for average marks'
+      ],
+      solution: `CREATE TABLE enrollments (
+    student_id INTEGER,
+    subject TEXT,
+    score INTEGER
+);
+INSERT INTO enrollments VALUES (101, 'Python Programming', 88), (102, 'Python Programming', 94), (103, 'C++ Data Structures', 76), (104, 'C++ Data Structures', 84), (105, 'SQL Databases', 90);
+
+SELECT subject, COUNT(*) as student_count, ROUND(AVG(score), 1) as avg_score FROM enrollments GROUP BY subject ORDER BY avg_score DESC;
+`
+    }
+  ]
+};
+
 export const SchoolCodeLabView = () => {
   usePageTitle('Practice Code Lab');
   const { addToast } = useLMS();
@@ -173,19 +385,22 @@ export const SchoolCodeLabView = () => {
   // Mode: 'guided' | 'freeform'
   const [activeMode, setActiveMode] = useState('guided');
 
+  // Selected language runtime ('python' | 'cpp' | 'sql')
+  const [language, setLanguage] = useState('python');
+  const currentLangConfig = LANGUAGE_OPTIONS.find((l) => l.id === language) || LANGUAGE_OPTIONS[0];
+
+  const currentExercises = MULTI_LANG_EXERCISES[language] || MULTI_LANG_EXERCISES.python;
+
   // Selected guided exercise
-  const [selectedExerciseId, setSelectedExerciseId] = useState(GUIDED_EXERCISES[0].id);
-  const activeExercise = GUIDED_EXERCISES.find((e) => e.id === selectedExerciseId) || GUIDED_EXERCISES[0];
+  const [selectedExerciseId, setSelectedExerciseId] = useState(currentExercises[0].id);
+  const activeExercise = currentExercises.find((e) => e.id === selectedExerciseId) || currentExercises[0];
 
   // Hints & solution reveals
   const [showHints, setShowHints] = useState(false);
   const [solutionRevealed, setSolutionRevealed] = useState(false);
 
-  // Selected language runtime
-  const [language, setLanguage] = useState('python');
-
   // Editor code buffer initialized with starter code with TODO markers
-  const [code, setCode] = useState(GUIDED_EXERCISES[0].starterCode);
+  const [code, setCode] = useState(currentExercises[0].starterCode);
 
   // Execution state & output panels
   const [isRunning, setIsRunning] = useState(false);
@@ -198,7 +413,7 @@ export const SchoolCodeLabView = () => {
   // When switching guided exercises
   const handleSelectExercise = (exerciseId) => {
     setSelectedExerciseId(exerciseId);
-    const ex = GUIDED_EXERCISES.find((e) => e.id === exerciseId);
+    const ex = currentExercises.find((e) => e.id === exerciseId);
     if (ex) {
       setCode(ex.starterCode);
       setShowHints(false);
@@ -208,6 +423,27 @@ export const SchoolCodeLabView = () => {
       setExecutionState('READY');
       setExecutionMetrics(null);
     }
+  };
+
+  // When switching programming languages (Python, C++, SQL)
+  const handleSelectLanguage = (langId) => {
+    setLanguage(langId);
+    const exercisesForLang = MULTI_LANG_EXERCISES[langId] || MULTI_LANG_EXERCISES.python;
+    const firstEx = exercisesForLang[0];
+    setSelectedExerciseId(firstEx.id);
+    setShowHints(false);
+    setSolutionRevealed(false);
+    setStdout('');
+    setStderr('');
+    setExecutionState('READY');
+    setExecutionMetrics(null);
+    if (activeMode === 'freeform') {
+      setCode(FREEFORM_STARTERS[langId] || FREEFORM_STARTERS.python);
+    } else {
+      setCode(firstEx.starterCode);
+    }
+    const targetConfig = LANGUAGE_OPTIONS.find((l) => l.id === langId);
+    addToast('Environment Switched', `Active sandbox changed to ${targetConfig?.label || langId}.`, 'emerald');
   };
 
   // When switching between guided and freeform mode
@@ -220,7 +456,7 @@ export const SchoolCodeLabView = () => {
     setExecutionState('READY');
     setExecutionMetrics(null);
     if (mode === 'freeform') {
-      setCode(EMPTY_STARTER_CODE);
+      setCode(FREEFORM_STARTERS[language] || FREEFORM_STARTERS.python);
     } else {
       setCode(activeExercise.starterCode);
     }
@@ -266,7 +502,7 @@ export const SchoolCodeLabView = () => {
           status: state,
           exitCode: response.status || 1,
           durationMs,
-          language: 'Python 3.10'
+          language: currentLangConfig.label
         });
         setOutputTab('errors');
         return;
@@ -286,8 +522,8 @@ export const SchoolCodeLabView = () => {
         status: state,
         exitCode,
         durationMs,
-        language: response.data?.language || 'Python',
-        version: response.data?.version || '3.10'
+        language: response.data?.language || currentLangConfig.label,
+        version: response.data?.version || 'Latest'
       });
 
       if (exitCode !== 0 && errText && !outText) {
@@ -309,13 +545,13 @@ export const SchoolCodeLabView = () => {
         status: 'FAILED',
         exitCode: -1,
         durationMs,
-        language: 'Python 3.10'
+        language: currentLangConfig.label
       });
       setOutputTab('errors');
     } finally {
       setIsRunning(false);
     }
-  }, [isRunning, language, code, addToast]);
+  }, [isRunning, language, code, currentLangConfig.label, addToast]);
 
   // Reset Editor to template
   const handleResetEditor = () => {
@@ -391,22 +627,33 @@ export const SchoolCodeLabView = () => {
               <h1 style={{ fontSize: '1.35rem', fontWeight: 800, margin: 0, color: 'var(--text-primary)' }}>
                 Practice Code Lab
               </h1>
-              <span
-                style={{
-                  fontSize: '0.7rem',
-                  fontWeight: 700,
-                  padding: '0.15rem 0.6rem',
-                  borderRadius: '100px',
-                  backgroundColor: 'rgba(37, 99, 235, 0.08)',
-                  color: '#2563EB',
-                  border: '1px solid rgba(37, 99, 235, 0.2)'
-                }}
-              >
-                Python 3.10
-              </span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                {LANGUAGE_OPTIONS.map((langOpt) => {
+                  const isLangActive = language === langOpt.id;
+                  return (
+                    <button
+                      key={langOpt.id}
+                      onClick={() => handleSelectLanguage(langOpt.id)}
+                      style={{
+                        fontSize: '0.72rem',
+                        fontWeight: 700,
+                        padding: '0.2rem 0.65rem',
+                        borderRadius: '100px',
+                        border: isLangActive ? `1px solid ${langOpt.iconColor}` : '1px solid var(--border-default)',
+                        backgroundColor: isLangActive ? `${langOpt.iconColor}18` : 'var(--bg-secondary)',
+                        color: isLangActive ? langOpt.iconColor : 'var(--text-secondary)',
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease'
+                      }}
+                    >
+                      {langOpt.label}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
             <p style={{ margin: '0.2rem 0 0', fontSize: '0.84rem', color: 'var(--text-secondary)' }}>
-              Practice coding in a safe sandbox. Educational runs are isolated and never modify homework submissions or graded assessments.
+              Practice coding in a safe sandbox across Python, C++, and SQL. Educational runs are isolated and never modify homework submissions or graded assessments.
             </p>
           </div>
         </div>
@@ -472,7 +719,7 @@ export const SchoolCodeLabView = () => {
         >
           {/* Exercise Selection Carousel / Grid */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', overflowX: 'auto', paddingBottom: '0.3rem' }}>
-            {GUIDED_EXERCISES.map((ex) => {
+            {currentExercises.map((ex) => {
               const isSelected = ex.id === selectedExerciseId;
               return (
                 <button
@@ -649,10 +896,10 @@ export const SchoolCodeLabView = () => {
               }}
             >
               <FileCode size={15} />
-              <span>main.py</span>
+              <span>{currentLangConfig.ext}</span>
             </div>
             <span style={{ fontSize: '0.72rem', color: '#64748B' }}>
-              {activeMode === 'guided' ? `Exercise: ${activeExercise.title}` : 'Freeform Scratchpad'}
+              {activeMode === 'guided' ? `Exercise: ${activeExercise.title}` : `Freeform ${currentLangConfig.label} Sandbox`}
             </span>
           </div>
 
@@ -723,7 +970,7 @@ export const SchoolCodeLabView = () => {
         <div style={{ height: '380px', minHeight: '300px', position: 'relative' }}>
           <Editor
             height="100%"
-            language="python"
+            language={currentLangConfig.monaco}
             theme="vs-dark"
             value={code}
             onChange={(val) => setCode(val ?? '')}

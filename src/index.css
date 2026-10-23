@@ -1,7 +1,7 @@
 /* ==========================================================================
-   LUMINA V3 — ENTERPRISE ACADEMIC DESIGN SYSTEM
-   6th Civilians Corporation
-   Colors: Clean White, Layered Slate Surfaces, Restrained Emerald/Blue/Indigo
+   EDWTH LMS — ENTERPRISE ACADEMIC DESIGN SYSTEM
+   EdWth Academy — Empowering Every Learner
+   Palette: Deep Obsidian (#171717), Academy Orange (#F58212), Amber Gold (#FFB21A), Warm Ivory (#F7F3EA)
    ========================================================================== */
 
 :root {
@@ -14,17 +14,22 @@
   --bg-input: #FFFFFF;
   --bg-header: #FFFFFF;
   
-  /* Restrained Emerald Brand Accent */
-  --accent-primary: #059669;
-  --accent-primary-hover: #047857;
-  --accent-primary-subtle: rgba(5, 150, 105, 0.08);
-  --accent-primary-glow: rgba(5, 150, 105, 0.14);
-  --accent-secondary: #047857;
-  --accent-mint: #10b981;
+  /* EdWth Academy Brand Core Tokens */
+  --edwth-obsidian: #171717;
+  --edwth-orange: #F58212;
+  --edwth-amber: #FFB21A;
+  --edwth-ivory: #F7F3EA;
 
-  /* Learning content accent — used in sidebar sub-labels for trainer/admin portals */
-  /* Maps to indigo: educational, professional, distinct from the primary emerald brand */
-  --accent-learning: #6366F1;
+  /* Primary Brand Accent (Academy Orange & Amber Gold) */
+  --accent-primary: #F58212;
+  --accent-primary-hover: #E07106;
+  --accent-primary-subtle: rgba(245, 130, 18, 0.08);
+  --accent-primary-glow: rgba(245, 130, 18, 0.16);
+  --accent-secondary: #FFB21A;
+  --accent-mint: #10B981;
+
+  /* Learning content accent */
+  --accent-learning: #F58212;
 
   /* Intentional Purpose-Driven Color Accents */
   --accent-blue: #2563EB;
@@ -39,18 +44,18 @@
   --border-subtle: #F1F5F9;
   --border-default: #E2E8F0;
   --border-hover: #CBD5E1;
-  --border-focus: #2563EB;
-  --border-glow: rgba(5, 150, 105, 0.25);
+  --border-focus: #F58212;
+  --border-glow: rgba(245, 130, 18, 0.25);
 
   /* Semantic Typography Tokens */
-  --text-primary: #172033;
+  --text-primary: #171717;
   --text-secondary: #64748B;
   --text-muted: #94A3B8;
   --text-on-primary: #FFFFFF;
   --text-on-accent: #FFFFFF;
-  --text-white: #FFFFFF; /* Preserved for colored buttons & badges */
-  --text-accent: #059669;
-  --text-dark: #0F172A;
+  --text-white: #FFFFFF;
+  --text-accent: #F58212;
+  --text-dark: #171717;
 
   /* Priority & Status Semantic Tokens */
   --priority-urgent-bg: rgba(220, 38, 38, 0.08);

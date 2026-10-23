@@ -27,14 +27,26 @@ export const AssessmentEditorModal = ({ challenge, onClose }) => {
   const { triggerConfetti, addToast, user, setUser, setCodingChallenges } = useLMS();
 
   // Language state
-  const [selectedLangId, setSelectedLangId] = useState('python');
+  // Language state initialized from challenge definition or subject
+  const initialLang = challenge?.language ||
+    (challenge?.subject?.toLowerCase().includes('sql') ? 'sql' :
+    (challenge?.subject?.toLowerCase().includes('c++') || challenge?.subject?.toLowerCase().includes('cpp')) ? 'cpp' :
+    'python');
+  const [selectedLangId, setSelectedLangId] = useState(initialLang);
   const currentLanguage =
     PROGRAMMING_LANGUAGES.find((lang) => lang.id === selectedLangId) || PROGRAMMING_LANGUAGES[0];
 
   // Editor Code State
+  const defaultStarters = {
+    python: `# ${challenge?.title || 'Python Assessment'}\n`,
+    cpp: `// ${challenge?.title || 'C++ Assessment'}\n#include <iostream>\n\nint main() {\n    // Solution implementation\n    return 0;\n}\n`,
+    sql: `-- ${challenge?.title || 'SQL Assessment'}\n-- Write your SQL query here\n`
+  };
+
   const starterCode =
     challenge.codeSnippets?.[selectedLangId] ||
     challenge.codeSnippets?.python ||
+    defaultStarters[selectedLangId] ||
     `# ${challenge.title}\n`;
 
   const [code, setCode] = useState(starterCode);

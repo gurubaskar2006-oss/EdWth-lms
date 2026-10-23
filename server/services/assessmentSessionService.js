@@ -3,6 +3,7 @@ import { getRedisClient, isRedisHealthy } from './redisService.js';
 import AssessmentEvent from '../models/AssessmentEvent.js';
 import AssessmentAttempt from '../models/AssessmentAttempt.js';
 import Assessment from '../models/Assessment.js';
+import { executeIsolatedCode } from './pistonService.js';
 
 /**
  * Resilient In-Memory Key-Value & Set Store
@@ -378,6 +379,86 @@ export const processAssessmentEvent = async ({
 /**
  * Server-Authoritative Final Submission Finalization
  */
+/**
+ * Server-authoritative automated evaluation for structured assessment questions (MCQ, Python, C++, SQL).
+ * Grades choices directly against persisted correctAnswer and executes code test cases in sandbox.
+ */
+export const evaluateQuestions = async (questions = [], answers = []) => {
+  if (!Array.isArray(questions) || questions.length === 0) return null;
+
+  let totalScore = 0;
+  const results = [];
+
+  for (const q of questions) {
+    const studentAns = (answers || []).find((a) => (
+      (a && a.questionId && String(a.questionId) === String(q.id)) ||
+      (a && a.id && String(a.id) === String(q.id))
+    ));
+    const ansVal = studentAns?.value ?? studentAns?.answer ?? studentAns?.code ?? studentAns ?? '';
+    const qMarks = Number(q.marks) || 10;
+    let earned = 0;
+    let passed = false;
+    let detail = '';
+
+    if (q.type === 'mcq') {
+      if (q.correctAnswer != null && String(ansVal).trim().toLowerCase() === String(q.correctAnswer).trim().toLowerCase()) {
+        earned = qMarks;
+        passed = true;
+        detail = 'Correct choice selected';
+      } else {
+        detail = 'Incorrect choice';
+      }
+    } else if (q.type === 'coding' || q.type === 'sql') {
+      const code = String(ansVal).trim();
+      if (!code) {
+        detail = 'No code submitted';
+      } else if (Array.isArray(q.testCases) && q.testCases.length > 0) {
+        let passedCases = 0;
+        const totalCases = q.testCases.length;
+        const perCaseMarks = qMarks / totalCases;
+
+        for (const tc of q.testCases) {
+          try {
+            const execRes = await executeIsolatedCode({
+              language: q.language || 'python',
+              files: [{ content: code }],
+              stdin: tc.input || ''
+            });
+            const actualOut = (execRes.data?.run?.stdout || execRes.data?.run?.output || '').trim();
+            const expectedOut = (tc.expectedOutput || '').trim();
+            if (actualOut === expectedOut || (actualOut && expectedOut && actualOut.includes(expectedOut))) {
+              passedCases++;
+              earned += perCaseMarks;
+            }
+          } catch {
+            // failed test case
+          }
+        }
+        earned = Math.round(earned);
+        passed = passedCases === totalCases;
+        detail = `${passedCases}/${totalCases} test cases passed`;
+      } else {
+        earned = 0;
+        detail = 'Submitted, pending trainer evaluation';
+      }
+    } else {
+      detail = 'Submitted, pending evaluation';
+    }
+
+    totalScore += earned;
+    results.push({
+      questionId: q.id,
+      type: q.type,
+      marks: qMarks,
+      earned,
+      passed,
+      detail
+    });
+  }
+
+  return { totalScore, results };
+};
+
 export const finalizeAssessmentSubmission = async ({
   tenantId,
   userId,
@@ -527,9 +608,20 @@ export const finalizeAssessmentSubmission = async ({
 
   // Authoritative scoring values (never fabricate marks for un-evaluated submissions)
   const totalMarks = assessmentDoc?.totalMarks != null ? Number(assessmentDoc.totalMarks) : (session?.maxScore || 20);
-  const targetScore = isAutoTerminated ? 0 : null;
-  const targetPercentage = isAutoTerminated ? 0 : null;
-  const targetStatus = isAutoTerminated ? 'disqualified' : 'submitted';
+  let targetScore = isAutoTerminated ? 0 : null;
+  let targetPercentage = isAutoTerminated ? 0 : null;
+  let targetStatus = isAutoTerminated ? 'disqualified' : 'submitted';
+  let serverQuestionResults = [];
+
+  if (!isAutoTerminated && Array.isArray(assessmentDoc?.questions) && assessmentDoc.questions.length > 0) {
+    const evalData = await evaluateQuestions(assessmentDoc.questions, sanitizedAnswers);
+    if (evalData) {
+      targetScore = evalData.totalScore;
+      targetPercentage = totalMarks > 0 ? Math.round((evalData.totalScore / totalMarks) * 100) : 0;
+      targetStatus = 'evaluated';
+      serverQuestionResults = evalData.results;
+    }
+  }
 
   // Persist permanent AssessmentAttempt record to MongoDB with fail-closed error handling
   try {
@@ -599,7 +691,8 @@ export const finalizeAssessmentSubmission = async ({
             score: targetScore,
             maxScore: totalMarks,
             percentage: targetPercentage,
-            answers: sanitizedAnswers
+            answers: sanitizedAnswers,
+            questionResults: serverQuestionResults
           }
         },
         { returnDocument: 'after' }
@@ -659,7 +752,8 @@ export const finalizeAssessmentSubmission = async ({
           score: targetScore,
           maxScore: totalMarks,
           percentage: targetPercentage,
-          answers: sanitizedAnswers
+          answers: sanitizedAnswers,
+          questionResults: serverQuestionResults
         });
 
         if (effectiveAttemptNumber > 1 && mongoose.connection.readyState === 1) {

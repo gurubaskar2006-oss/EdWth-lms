@@ -183,28 +183,37 @@ export const Sidebar = () => {
           gap: '0.5rem'
         }}
       >
-        {/* Top: Lumina Monogram Brand */}
+        {/* Top: EdWth Brand */}
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.85rem', width: '100%' }}>
           <button
             onClick={() => {
               setActiveTab('dashboard');
               setSelectedCatId('home');
             }}
-            title="Lumina LMS — Home"
+            title="EdWth LMS — Empowering Every Learner"
             style={{
-              width: '40px',
-              height: '40px',
-              borderRadius: '10px',
-              background: 'linear-gradient(135deg, #059669 0%, #047857 100%)',
+              width: '42px',
+              height: '42px',
+              borderRadius: '12px',
+              backgroundColor: '#171717',
+              border: '1px solid #FFB21A44',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              boxShadow: '0 2px 8px rgba(5, 150, 105, 0.28)',
-              border: 'none',
-              cursor: 'pointer'
+              boxShadow: '0 3px 10px rgba(245, 130, 18, 0.28)',
+              cursor: 'pointer',
+              padding: '4px',
+              overflow: 'hidden'
             }}
           >
-            <Sparkles size={19} color="#FFFFFF" strokeWidth={2.3} />
+            <img
+              src="/logo-transparent.png"
+              alt="EdWth LMS"
+              style={{ width: '32px', height: '32px', objectFit: 'contain' }}
+              onError={(e) => {
+                e.currentTarget.style.display = 'none';
+              }}
+            />
           </button>
 
           <div style={{ width: '32px', height: '1px', backgroundColor: 'var(--border-subtle)' }} />
