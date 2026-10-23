@@ -1,0 +1,202 @@
+# =========================================================================
+# Lumina LMS V3 — Production Multi-Instance Cluster Compose
+# 6th Civilians Corporation
+#
+# PRODUCTION ARCHITECTURE:
+# 1. Edge routing & SSL termination handled by Hetzner Load Balancer or Nginx.
+# 2. API nodes (api1, api2) run stateless in NODE_ENV=production.
+# 3. Redis, Piston, and API ports are strictly internal to the Docker network.
+#    NO database or sandbox ports are published to host 0.0.0.0.
+# 4. Horizontal real-time Socket.io coordination via @socket.io/redis-adapter.
+# =========================================================================
+
+version: '3.8'
+
+services:
+  # Edge Reverse Proxy / Gateway
+  nginx:
+    image: nginx:alpine
+    container_name: lumina-prod-lb
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./docker/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - api1
+      - api2
+    networks:
+      - lumina-network
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 256M
+
+  # Lumina API Node 1 (Stateless Production Node)
+  api1:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: lumina-api-node-1
+    restart: unless-stopped
+    expose:
+      - "5000"
+    environment:
+      - PORT=5000
+      - NODE_ENV=production
+      - MONGO_URI=${MONGO_URI:?MONGO_URI is required}
+      - REDIS_URL=${REDIS_URL:-redis://:${REDIS_PASSWORD}@redis:6379/0}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+      - JWT_SECRET=${JWT_SECRET:?JWT_SECRET is required}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS}
+      - COOKIE_DOMAIN=${COOKIE_DOMAIN:-}
+      - COOKIE_SAME_SITE=${COOKIE_SAME_SITE:-lax}
+      - PISTON_WORKERS=http://piston1:2000,http://piston2:2000
+      - B2_ENDPOINT=${B2_ENDPOINT:-}
+      - B2_APPLICATION_KEY_ID=${B2_APPLICATION_KEY_ID:-}
+      - B2_APPLICATION_KEY=${B2_APPLICATION_KEY:-}
+      - B2_BUCKET_NAME=${B2_BUCKET_NAME:-lumina-enterprise-storage}
+      - B2_REGION=${B2_REGION:-us-west-004}
+      - BODY_SIZE_LIMIT=${BODY_SIZE_LIMIT:-10mb}
+      - CODE_QUEUE_CONCURRENCY=${CODE_QUEUE_CONCURRENCY:-5}
+      - CODE_QUEUE_MAX_PENDING=${CODE_QUEUE_MAX_PENDING:-300}
+      - CODE_QUEUE_WAIT_MS=${CODE_QUEUE_WAIT_MS:-20000}
+      - CODE_EXECUTION_TIMEOUT=${CODE_EXECUTION_TIMEOUT:-6000}
+      - CODE_EXECUTION_MAX_TIMEOUT=${CODE_EXECUTION_MAX_TIMEOUT:-10000}
+      - RATE_LIMIT_LOGIN_MAX=${RATE_LIMIT_LOGIN_MAX:-10}
+      - RATE_LIMIT_LOGIN_WINDOW_MS=${RATE_LIMIT_LOGIN_WINDOW_MS:-900000}
+    depends_on:
+      - redis
+      - piston1
+      - piston2
+    networks:
+      - lumina-network
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 1024M
+        reservations:
+          memory: 256M
+
+  # Lumina API Node 2 (Stateless Production Node)
+  api2:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: lumina-api-node-2
+    restart: unless-stopped
+    expose:
+      - "5000"
+    environment:
+      - PORT=5000
+      - NODE_ENV=production
+      - MONGO_URI=${MONGO_URI:?MONGO_URI is required}
+      - REDIS_URL=${REDIS_URL:-redis://:${REDIS_PASSWORD}@redis:6379/0}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+      - JWT_SECRET=${JWT_SECRET:?JWT_SECRET is required}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS}
+      - COOKIE_DOMAIN=${COOKIE_DOMAIN:-}
+      - COOKIE_SAME_SITE=${COOKIE_SAME_SITE:-lax}
+      - PISTON_WORKERS=http://piston1:2000,http://piston2:2000
+      - B2_ENDPOINT=${B2_ENDPOINT:-}
+      - B2_APPLICATION_KEY_ID=${B2_APPLICATION_KEY_ID:-}
+      - B2_APPLICATION_KEY=${B2_APPLICATION_KEY:-}
+      - B2_BUCKET_NAME=${B2_BUCKET_NAME:-lumina-enterprise-storage}
+      - B2_REGION=${B2_REGION:-us-west-004}
+      - BODY_SIZE_LIMIT=${BODY_SIZE_LIMIT:-10mb}
+      - CODE_QUEUE_CONCURRENCY=${CODE_QUEUE_CONCURRENCY:-5}
+      - CODE_QUEUE_MAX_PENDING=${CODE_QUEUE_MAX_PENDING:-300}
+      - CODE_QUEUE_WAIT_MS=${CODE_QUEUE_WAIT_MS:-20000}
+      - CODE_EXECUTION_TIMEOUT=${CODE_EXECUTION_TIMEOUT:-6000}
+      - CODE_EXECUTION_MAX_TIMEOUT=${CODE_EXECUTION_MAX_TIMEOUT:-10000}
+      - RATE_LIMIT_LOGIN_MAX=${RATE_LIMIT_LOGIN_MAX:-10}
+      - RATE_LIMIT_LOGIN_WINDOW_MS=${RATE_LIMIT_LOGIN_WINDOW_MS:-900000}
+    depends_on:
+      - redis
+      - piston1
+      - piston2
+    networks:
+      - lumina-network
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 1024M
+        reservations:
+          memory: 256M
+
+  # Redis 7 (Private Network Coordination Bus — NEVER publicly exposed)
+  redis:
+    image: redis:7-alpine
+    container_name: lumina-redis-bus
+    restart: unless-stopped
+    expose:
+      - "6379"
+    command: >
+      sh -c '
+        if [ -n "$$REDIS_PASSWORD" ]; then
+          redis-server --requirepass "$$REDIS_PASSWORD" --save 60 1 --loglevel notice
+        else
+          redis-server --save 60 1 --loglevel notice
+        fi
+      '
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+    volumes:
+      - redis-data:/data
+    networks:
+      - lumina-network
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+
+  # Isolated Piston Code Execution Worker 1 (Internal Sandbox Only)
+  piston1:
+    image: ghcr.io/engineer-man/piston:latest
+    container_name: lumina-piston-worker-1
+    restart: unless-stopped
+    expose:
+      - "2000"
+    privileged: true
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:ro
+    networks:
+      - lumina-network
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 1024M
+
+  # Isolated Piston Code Execution Worker 2 (Internal Sandbox Only)
+  piston2:
+    image: ghcr.io/engineer-man/piston:latest
+    container_name: lumina-piston-worker-2
+    restart: unless-stopped
+    expose:
+      - "2000"
+    privileged: true
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:ro
+    networks:
+      - lumina-network
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 1024M
+
+volumes:
+  redis-data:
+
+networks:
+  lumina-network:
+    driver: bridge

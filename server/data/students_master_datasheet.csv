@@ -1,0 +1,7 @@
+"Student ID","Full Name","Email / Username","Login Password","Role","Major","Department","Academic Year","GPA","Enrolled Courses","Account Status","Last Login"
+"NX-2024-8812","Alex Vance","alex.vance@mit.edu","Alex#Nexus2026!","Student","Computer Science & AI","School of Computing","Junior (Year 3)","3.92","CS 401; CS 330; DS 202; UX 210","Active","2026-08-15 18:20:11"
+"NX-2024-9104","Maya Lin","maya.lin@nexus.edu","Maya#Quantum99!","Student","Data Science & Quantum Computing","Computational Mathematics","Senior (Year 4)","3.98","CS 401; DS 202; SEC 410","Active","2026-08-15 17:45:00"
+"NX-2024-7421","Jordan Hayes","jordan.hayes@nexus.edu","Jordan#AI77!","Student","Distributed Systems & Cloud","Systems Engineering","Sophomore (Year 2)","3.75","CS 330; WEB 305; DS 202","Active","2026-08-14 20:10:45"
+"NX-2024-6590","Chloe Bennett","chloe.bennett@nexus.edu","Chloe#Design42!","Student","Human-Computer Interaction & UX","Design & Media Arts","Junior (Year 3)","3.90","UX 210; WEB 305; CS 401","Active","2026-08-15 16:02:30"
+"NX-2024-5182","Samir Patel","samir.patel@nexus.edu","Samir#Cloud55!","Student","Cybersecurity & Cryptography","Information Assurance","Graduate (M.S.)","4.00","SEC 410; CS 330; DS 202","Active","2026-08-15 18:05:19"
+"FAC-2020-001","Dr. Elena Rostova","elena.rostova@nexus.edu","Elena#Prof2026!","Instructor / Admin","Professor of Artificial Intelligence","Computer Science Dept Head","Faculty / Chair","4.00","CS 401; CS 330; DS 202; UX 210; WEB 305; SEC 410","Active","2026-08-15 18:35:00"

@@ -1,0 +1,123 @@
+# =========================================================================
+# Lumina LMS V3 — Local Multi-Instance Development Docker Compose
+# 6th Civilians Corporation
+#
+# Use this file ONLY for local multi-node cluster testing on localhost:
+# docker compose -f docker-compose.dev.yml up --build
+# =========================================================================
+
+version: '3.8'
+
+services:
+  nginx:
+    image: nginx:alpine
+    container_name: lumina-dev-lb
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./docker/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - api1
+      - api2
+    networks:
+      - lumina-dev-network
+
+  api1:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: lumina-api-dev-1
+    restart: unless-stopped
+    ports:
+      - "5001:5000"
+    environment:
+      - PORT=5000
+      - NODE_ENV=development
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - PISTON_WORKERS=http://piston1:2000,http://piston2:2000
+      - JWT_SECRET=dev-lumina-secret-change-in-vault-local-32chars
+      - MONGO_URI=${MONGO_URI:-}
+      - B2_ENDPOINT=${B2_ENDPOINT:-}
+      - B2_APPLICATION_KEY_ID=${B2_APPLICATION_KEY_ID:-}
+      - B2_APPLICATION_KEY=${B2_APPLICATION_KEY:-}
+      - B2_BUCKET_NAME=${B2_BUCKET_NAME:-lumina-dev-bucket}
+      - ALLOWED_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
+    depends_on:
+      - redis
+      - piston1
+      - piston2
+    networks:
+      - lumina-dev-network
+
+  api2:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: lumina-api-dev-2
+    restart: unless-stopped
+    ports:
+      - "5002:5000"
+    environment:
+      - PORT=5000
+      - NODE_ENV=development
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - PISTON_WORKERS=http://piston1:2000,http://piston2:2000
+      - JWT_SECRET=dev-lumina-secret-change-in-vault-local-32chars
+      - MONGO_URI=${MONGO_URI:-}
+      - B2_ENDPOINT=${B2_ENDPOINT:-}
+      - B2_APPLICATION_KEY_ID=${B2_APPLICATION_KEY_ID:-}
+      - B2_APPLICATION_KEY=${B2_APPLICATION_KEY:-}
+      - B2_BUCKET_NAME=${B2_BUCKET_NAME:-lumina-dev-bucket}
+      - ALLOWED_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
+    depends_on:
+      - redis
+      - piston1
+      - piston2
+    networks:
+      - lumina-dev-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: lumina-redis-dev
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: redis-server --save 60 1 --loglevel notice
+    volumes:
+      - redis-dev-data:/data
+    networks:
+      - lumina-dev-network
+
+  piston1:
+    image: ghcr.io/engineer-man/piston:latest
+    container_name: lumina-piston-dev-1
+    restart: unless-stopped
+    ports:
+      - "2001:2000"
+    privileged: true
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:ro
+    networks:
+      - lumina-dev-network
+
+  piston2:
+    image: ghcr.io/engineer-man/piston:latest
+    container_name: lumina-piston-dev-2
+    restart: unless-stopped
+    ports:
+      - "2002:2000"
+    privileged: true
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:ro
+    networks:
+      - lumina-dev-network
+
+volumes:
+  redis-dev-data:
+
+networks:
+  lumina-dev-network:
+    driver: bridge
