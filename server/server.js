@@ -136,7 +136,7 @@ const BASE_ORIGINS = [
 ];
 
 const ENV_ORIGINS = process.env.ALLOWED_ORIGINS
-  ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim()).filter(Boolean)
+  ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim().replace(/\/+$/, '')).filter(Boolean)
   : [
       'http://portal.domain.com',
       'http://trainer.domain.com',
@@ -145,11 +145,20 @@ const ENV_ORIGINS = process.env.ALLOWED_ORIGINS
 
 const allowedOrigins = [...new Set([...BASE_ORIGINS, ...ENV_ORIGINS])];
 
+const isAllowedOrigin = (origin) => {
+  if (!origin) return true;
+  const cleanOrigin = origin.trim().replace(/\/+$/, '');
+  return (
+    allowedOrigins.includes(cleanOrigin) ||
+    cleanOrigin.startsWith('http://localhost') ||
+    cleanOrigin.startsWith('http://127.0.0.1') ||
+    cleanOrigin.endsWith('.vercel.app')
+  );
+};
+
 app.use(cors({
   origin: function (origin, callback) {
-    if (!origin || allowedOrigins.includes(origin) ||
-        origin.startsWith('http://localhost') ||
-        origin.startsWith('http://127.0.0.1')) {
+    if (isAllowedOrigin(origin)) {
       callback(null, true);
     } else {
       callback(new Error('Not allowed by CORS'));
@@ -309,7 +318,7 @@ const io = new Server(httpServer, {
   transports: ['websocket'],
   cors: {
     origin: function (origin, callback) {
-      if (!origin || allowedOrigins.includes(origin) || origin.startsWith('http://localhost') || origin.startsWith('http://127.0.0.1')) {
+      if (isAllowedOrigin(origin)) {
         callback(null, true);
       } else {
         callback(new Error('Not allowed by CORS'));
