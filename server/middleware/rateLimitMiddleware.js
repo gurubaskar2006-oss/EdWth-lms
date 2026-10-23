@@ -136,8 +136,8 @@ const createRateLimiter = (limitKey, isCritical = false, keyFn = null) => {
       return next();
     }
 
-    // Redis unavailable — apply policy based on criticality and environment
-    if (IS_PRODUCTION && isCritical) {
+    // Redis unavailable — if multi-node clustering is strictly required (REQUIRE_REDIS=true), fail closed
+    if (IS_PRODUCTION && isCritical && process.env.REQUIRE_REDIS === 'true') {
       console.warn(`[RateLimit] Redis unavailable for critical endpoint "${limitKey}". Failing closed.`);
       return res.status(503).json({
         success: false,
@@ -148,19 +148,12 @@ const createRateLimiter = (limitKey, isCritical = false, keyFn = null) => {
       });
     }
 
-    // Development fallback: in-memory limiter (never in production for critical endpoints)
-    if (IS_PRODUCTION) {
-      // Non-critical in production with Redis down — allow but log
-      console.warn(`[RateLimit] Redis unavailable for non-critical endpoint "${limitKey}". Allowing request.`);
-      return next();
-    }
-
-    // Development: use in-memory fallback
+    // In single-instance cloud mode (or dev), safely enforce rate limits using the built-in in-memory store
     const memResult = memoryCheck(redisKey, max, windowMs);
     res.setHeader('X-RateLimit-Limit',     max);
     res.setHeader('X-RateLimit-Remaining', memResult.remaining);
     res.setHeader('X-RateLimit-Reset',     Math.ceil(memResult.resetAt / 1000));
-    res.setHeader('X-RateLimit-Store',     'memory-dev-fallback');
+    res.setHeader('X-RateLimit-Store',     IS_PRODUCTION ? 'memory-instance-store' : 'memory-dev-fallback');
 
     if (!memResult.allowed) {
       return res.status(429).json({
