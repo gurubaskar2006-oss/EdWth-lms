@@ -273,6 +273,15 @@ if (fs.existsSync(DIST_PATH)) {
     }
     res.sendFile(path.join(DIST_PATH, 'index.html'));
   });
+} else {
+  // When running in API-only mode (frontend hosted on Vercel), provide a clean root status
+  app.get('/', (req, res) => {
+    res.json({
+      service: 'Lumina LMS Enterprise API by 6th Civilians Corporation',
+      status: 'online',
+      health: '/api/v1/health'
+    });
+  });
 }
 
 // Centralized error handler — never expose internal errors to clients
