@@ -29,6 +29,17 @@ export const apiService = {
         window.dispatchEvent(new CustomEvent('lms_session_expired'));
       }
     }
+
+    if (res.status === 403 && !url.includes('/auth/2fa')) {
+      try {
+        const clone = res.clone();
+        clone.json().then(data => {
+          if (data && (data.code === 'MFA_SETUP_REQUIRED' || (data.message && data.message.includes('Multi-factor authentication enrollment')))) {
+            window.dispatchEvent(new CustomEvent('lms_mfa_setup_required', { detail: data }));
+          }
+        }).catch(() => {});
+      } catch {}
+    }
     
     return res;
   },
@@ -67,8 +78,20 @@ export const apiService = {
         body: JSON.stringify({ preAuthToken, token }),
       });
       const data = await res.json();
-      if (data && data.success && data.token) {
-        localStorage.setItem('lumina_auth_token', data.token);
+      if (data && data.success) {
+        if (data.token) {
+          localStorage.setItem('lumina_auth_token', data.token);
+        }
+        if (data.user || data.isTwoFactorEnabled) {
+          try {
+            const rawUser = localStorage.getItem('lumina_current_user');
+            if (rawUser) {
+              const parsed = JSON.parse(rawUser);
+              const merged = { ...parsed, ...(data.user || {}), isTwoFactorEnabled: true, mfaSetupRequired: false };
+              localStorage.setItem('lumina_current_user', JSON.stringify(merged));
+            }
+          } catch {}
+        }
       }
       return data;
     } catch (e) {

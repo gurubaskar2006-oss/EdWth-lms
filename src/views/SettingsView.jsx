@@ -15,13 +15,15 @@ import {
   Save,
   RefreshCw,
   QrCode,
-  ShieldCheck
+  Copy,
+  Check,
+  AlertTriangle
 } from 'lucide-react';
 import { apiService } from '../services/apiService';
 
 export const SettingsView = ({ onCancel }) => {
   usePageTitle('Settings & Profile');
-  const { user, setUser, addToast, setActiveTab } = useLMS();
+  const { user, setUser, handleMfaEnrolled, addToast, setActiveTab } = useLMS();
 
   const role = (user?.role || '').toLowerCase();
   const isStudent = role === 'student';
@@ -57,6 +59,10 @@ export const SettingsView = ({ onCancel }) => {
   // 2FA Security State
   const [twoFactorData, setTwoFactorData] = useState(null);
   const [isSettingUp2FA, setIsSettingUp2FA] = useState(false);
+  const [totpCode, setTotpCode] = useState('');
+  const [isVerifying2FA, setIsVerifying2FA] = useState(false);
+  const [verifyError, setVerifyError] = useState('');
+  const [copiedKey, setCopiedKey] = useState(false);
 
   // Sync form state if user changes externally
   useEffect(() => {
@@ -93,13 +99,44 @@ export const SettingsView = ({ onCancel }) => {
 
   const handleSetup2FA = async () => {
     setIsSettingUp2FA(true);
+    setVerifyError('');
     const result = await apiService.setup2FA();
     setIsSettingUp2FA(false);
     if (result && result.success) {
       setTwoFactorData(result);
-      addToast('2FA Enabled', 'Please scan the QR code in your authenticator app.', 'emerald');
+      addToast('2FA Credentials Generated', 'Scan the QR code and enter the 6-digit code to activate.', 'emerald');
     } else {
-      addToast('2FA Setup Failed', result?.message || 'Could not enable 2FA', 'error');
+      addToast('2FA Setup Failed', result?.message || 'Could not initiate 2FA setup', 'error');
+    }
+  };
+
+  const handleVerify2FASubmit = async (e) => {
+    if (e) e.preventDefault();
+    const clean = totpCode.replace(/\s+/g, '');
+    if (!clean) {
+      setVerifyError('Please enter the 6-digit code from your authenticator app.');
+      return;
+    }
+    try {
+      setIsVerifying2FA(true);
+      setVerifyError('');
+      const res = await apiService.verify2FA(null, clean);
+      if (res && res.success) {
+        if (typeof handleMfaEnrolled === 'function') {
+          handleMfaEnrolled(res.user);
+        } else {
+          setUser((prev) => ({ ...prev, isTwoFactorEnabled: true, mfaSetupRequired: false }));
+          addToast('2FA Activated', 'Two-Factor Authentication is active.', 'emerald');
+        }
+        setTwoFactorData(null);
+        setTotpCode('');
+      } else {
+        setVerifyError(res?.message || 'Invalid verification code. Please try again.');
+      }
+    } catch {
+      setVerifyError('Network error verifying code.');
+    } finally {
+      setIsVerifying2FA(false);
     }
   };
 
@@ -747,22 +784,85 @@ export const SettingsView = ({ onCancel }) => {
           </div>
 
           {twoFactorData && (
-            <div style={{ marginTop: '1rem', padding: '1.25rem', backgroundColor: 'var(--bg-surface)', borderRadius: 'var(--radius-md)', border: '1px dashed var(--accent-primary)', display: 'flex', gap: '1.5rem', flexWrap: 'wrap' }}>
-              <div>
-                <h4 style={{ color: 'var(--text-primary)', fontSize: '0.85rem', marginBottom: '0.5rem', fontWeight: 700 }}>Scan QR Code</h4>
-                <img src={twoFactorData.qrCode} alt="2FA QR Code" style={{ borderRadius: '8px', border: '1px solid var(--border-default)', background: '#FFFFFF', padding: '6px', width: '130px', height: '130px' }} />
-              </div>
-              <div style={{ flex: 1, minWidth: '220px' }}>
-                <h4 style={{ color: 'var(--text-primary)', fontSize: '0.85rem', marginBottom: '0.35rem', fontWeight: 700 }}>Backup Recovery Codes</h4>
-                <p style={{ color: 'var(--text-secondary)', fontSize: '0.76rem', marginBottom: '0.65rem' }}>Store these in a safe location:</p>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.4rem' }}>
-                  {twoFactorData.backupCodes?.map((code, idx) => (
-                    <div key={idx} style={{ padding: '0.35rem', backgroundColor: 'var(--bg-secondary)', borderRadius: '4px', fontFamily: 'var(--font-mono)', fontSize: '0.78rem', textAlign: 'center', fontWeight: 700 }}>
-                      {code}
+            <div style={{ marginTop: '1rem', padding: '1.25rem', backgroundColor: 'var(--bg-surface)', borderRadius: 'var(--radius-md)', border: '1px dashed var(--accent-primary)', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+              <div style={{ display: 'flex', gap: '1.5rem', flexWrap: 'wrap' }}>
+                <div>
+                  <h4 style={{ color: 'var(--text-primary)', fontSize: '0.85rem', marginBottom: '0.5rem', fontWeight: 700 }}>Scan QR Code</h4>
+                  <img src={twoFactorData.qrCode} alt="2FA QR Code" style={{ borderRadius: '8px', border: '1px solid var(--border-default)', background: '#FFFFFF', padding: '6px', width: '130px', height: '130px' }} />
+                  {twoFactorData.secret && (
+                    <div style={{ marginTop: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                      <code style={{ fontSize: '0.72rem', color: '#FFB21A', background: 'var(--bg-secondary)', padding: '2px 6px', borderRadius: '4px' }}>
+                        {twoFactorData.secret}
+                      </code>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          navigator.clipboard.writeText(twoFactorData.secret);
+                          setCopiedKey(true);
+                          setTimeout(() => setCopiedKey(false), 2000);
+                        }}
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', color: copiedKey ? '#059669' : 'var(--text-secondary)' }}
+                        title="Copy Secret"
+                      >
+                        {copiedKey ? <Check size={12} /> : <Copy size={12} />}
+                      </button>
                     </div>
-                  ))}
+                  )}
+                </div>
+                <div style={{ flex: 1, minWidth: '220px' }}>
+                  <h4 style={{ color: 'var(--text-primary)', fontSize: '0.85rem', marginBottom: '0.35rem', fontWeight: 700 }}>Backup Recovery Codes</h4>
+                  <p style={{ color: 'var(--text-secondary)', fontSize: '0.76rem', marginBottom: '0.65rem' }}>Store these in a safe location:</p>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.4rem' }}>
+                    {twoFactorData.backupCodes?.map((code, idx) => (
+                      <div key={idx} style={{ padding: '0.35rem', backgroundColor: 'var(--bg-secondary)', borderRadius: '4px', fontFamily: 'var(--font-mono)', fontSize: '0.78rem', textAlign: 'center', fontWeight: 700 }}>
+                        {code}
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </div>
+
+              {/* Complete Setup Form */}
+              <form onSubmit={handleVerify2FASubmit} style={{ paddingTop: '1rem', borderTop: '1px solid var(--border-default)', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                <label style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+                  Enter 6-Digit Authenticator Code to Activate:
+                </label>
+                <div style={{ display: 'flex', gap: '0.75rem', maxWidth: '340px' }}>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    maxLength={6}
+                    value={totpCode}
+                    onChange={(e) => setTotpCode(e.target.value.replace(/[^0-9]/g, ''))}
+                    placeholder="123456"
+                    disabled={isVerifying2FA}
+                    style={{
+                      flex: 1,
+                      fontSize: '1.1rem',
+                      fontFamily: 'var(--font-mono)',
+                      letterSpacing: '0.2em',
+                      textAlign: 'center',
+                      padding: '0.5rem',
+                      borderRadius: '8px',
+                      border: verifyError ? '1px solid #EF4444' : '1px solid var(--border-default)'
+                    }}
+                  />
+                  <button
+                    type="submit"
+                    disabled={isVerifying2FA || !totpCode.trim()}
+                    className="btn-primary"
+                    style={{ backgroundColor: '#F58212', borderColor: '#F58212', whiteSpace: 'nowrap' }}
+                  >
+                    {isVerifying2FA ? 'Verifying...' : 'Activate 2FA'}
+                  </button>
+                </div>
+                {verifyError && (
+                  <div style={{ color: '#EF4444', fontSize: '0.78rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                    <AlertTriangle size={13} />
+                    <span>{verifyError}</span>
+                  </div>
+                )}
+              </form>
             </div>
           )}
         </div>

@@ -156,7 +156,10 @@ export const login = async (req, res) => {
         mustChangePassword: !!user.mustChangePassword,
         tenantId: user.tenantId,
         institutionType,
-        tenantName
+        tenantName,
+        isTwoFactorEnabled: !!user.isTwoFactorEnabled,
+        mfaEnforced: !!user.mfaEnforced,
+        mfaSetupRequired: !!user.mfaSetupRequired
       }
     });
   } catch (error) {
@@ -481,7 +484,7 @@ export const setup2FA = async (req, res) => {
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
     
     // Generate secret
-    const secret = speakeasy.generateSecret({ name: `LuminaLMS (${user.email})` });
+    const secret = speakeasy.generateSecret({ name: `EdWth LMS (${user.email})`, issuer: 'EdWth Academy' });
     user.twoFactorSecret = secret.base32;
     
     // Generate backup codes
@@ -649,6 +652,18 @@ export const verify2FA = async (req, res) => {
       return res.status(200).json({
         success: true,
         isTwoFactorEnabled: true,
+        user: {
+          _id: user._id,
+          name: user.name,
+          email: user.email,
+          studentId: user.studentId,
+          role: user.role,
+          mustChangePassword: !!user.mustChangePassword,
+          tenantId: user.tenantId,
+          isTwoFactorEnabled: true,
+          mfaEnforced: !!user.mfaEnforced,
+          mfaSetupRequired: false
+        },
         message: 'Two-factor authentication successfully verified and activated.'
       });
     }

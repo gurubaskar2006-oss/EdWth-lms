@@ -8,6 +8,7 @@ import { NotFoundView } from './views/NotFoundView';
 import { SettingsView } from './views/SettingsView';
 import { UnauthenticatedView } from './components/UnauthenticatedView';
 import { MultiSchoolManagementView } from './views/MultiSchoolManagementView';
+import { MfaEnrollmentModal } from './components/MfaEnrollmentModal';
 import { apiService } from './services/apiService';
 import {
   InstitutionAnalyticsView,
@@ -1007,9 +1008,31 @@ export const AdminApp = () => {
   const { activeTab, setActiveTab, isAuthenticated, user, logout, terms, addToast } = useLMS();
   const [createBatchOpen, setCreateBatchOpen] = useState(false);
   const [provisionTrainerOpen, setProvisionTrainerOpen] = useState(false);
+  const [mfaModalOpen, setMfaModalOpen] = useState(false);
+  const [adminRefreshKey, setAdminRefreshKey] = useState(0);
 
   const currentRole = (user?.role || '').toLowerCase();
   const isSuperAdmin = currentRole === 'superadmin';
+
+  // Privileged account MFA requirement check
+  const requiresMfaEnrollment =
+    ((isSuperAdmin || user?.mfaEnforced || user?.mfaSetupRequired)) &&
+    !user?.isTwoFactorEnabled;
+
+  useEffect(() => {
+    if (isAuthenticated && requiresMfaEnrollment) {
+      setMfaModalOpen(true);
+    }
+  }, [isAuthenticated, requiresMfaEnrollment]);
+
+  // Intercept backend 403 MFA_SETUP_REQUIRED events dispatched by apiService
+  useEffect(() => {
+    const handleMfaRequired = () => {
+      setMfaModalOpen(true);
+    };
+    window.addEventListener('lms_mfa_setup_required', handleMfaRequired);
+    return () => window.removeEventListener('lms_mfa_setup_required', handleMfaRequired);
+  }, []);
   if (!isAuthenticated) {
     return <UnauthenticatedView portalName="Admin Portal" role="admin" />;
   }
@@ -1032,53 +1055,54 @@ export const AdminApp = () => {
       case 'dashboard':
         return (
           <AdminDashboard
+            key={`dashboard-${adminRefreshKey}`}
             onOpenCreateBatch={() => setCreateBatchOpen(true)}
             onOpenProvisionTrainer={() => setProvisionTrainerOpen(true)}
             onNavigateTab={(tab) => setActiveTab(tab)}
           />
         );
       case 'analytics':
-        return <InstitutionAnalyticsView />;
+        return <InstitutionAnalyticsView key={`analytics-${adminRefreshKey}`} />;
       case 'schools':
       case 'multiSchool':
-        return <MultiSchoolManagementView />;
+        return <MultiSchoolManagementView key={`schools-${adminRefreshKey}`} />;
       case 'institutions':
       case 'colleges':
-        return <InstitutionsDirectoryView />;
+        return <InstitutionsDirectoryView key={`institutions-${adminRefreshKey}`} />;
       case 'students':
-        return <StudentsDataSheetView />;
+        return <StudentsDataSheetView key={`students-${adminRefreshKey}`} />;
       case 'trainers':
-        return <TrainerProvisioningView onOpenProvisionTrainer={() => setProvisionTrainerOpen(true)} />;
+        return <TrainerProvisioningView key={`trainers-${adminRefreshKey}`} onOpenProvisionTrainer={() => setProvisionTrainerOpen(true)} />;
       case 'administrators':
-        return <AdministratorsView />;
+        return <AdministratorsView key={`admins-${adminRefreshKey}`} />;
       case 'batches':
-        return <CollegeManagementView onOpenCreateBatch={() => setCreateBatchOpen(true)} />;
+        return <CollegeManagementView key={`batches-${adminRefreshKey}`} onOpenCreateBatch={() => setCreateBatchOpen(true)} />;
       case 'subjects':
-        return <SubjectsCatalogView />;
+        return <SubjectsCatalogView key={`subjects-${adminRefreshKey}`} />;
       case 'structure':
-        return <AcademicStructureView />;
+        return <AcademicStructureView key={`structure-${adminRefreshKey}`} />;
       case 'attendanceOps':
-        return <AttendanceOperationsView />;
+        return <AttendanceOperationsView key={`attendance-${adminRefreshKey}`} />;
       case 'academicOps':
-        return <AcademicOpsView />;
+        return <AcademicOpsView key={`academic-${adminRefreshKey}`} />;
       case 'announcementsOps':
-        return <AnnouncementsOpsView />;
+        return <AnnouncementsOpsView key={`announcements-${adminRefreshKey}`} />;
       case 'doubtsOps':
       case 'doubts':
-        return <DoubtsOpsView />;
+        return <DoubtsOpsView key={`doubts-${adminRefreshKey}`} />;
       case 'reportsOps':
-        return <OperationsReportsView />;
+        return <OperationsReportsView key={`reports-${adminRefreshKey}`} />;
       case 'auditLogs':
-        return <AuditLogsView />;
+        return <AuditLogsView key={`audit-${adminRefreshKey}`} />;
       case 'permissions':
-        return <PermissionsView />;
+        return <PermissionsView key={`permissions-${adminRefreshKey}`} />;
       case 'institutionSettings':
-        return <InstitutionSettingsView />;
+        return <InstitutionSettingsView key={`instSettings-${adminRefreshKey}`} />;
       case 'architecture':
       case 'systemHealth':
-        return <ArchitectureView />;
+        return <ArchitectureView key={`arch-${adminRefreshKey}`} />;
       case 'settings':
-        return <SettingsView />;
+        return <SettingsView key={`settings-${adminRefreshKey}`} />;
       default:
         return <NotFoundView />;
     }
@@ -1299,6 +1323,14 @@ export const AdminApp = () => {
           addToast('Trainer Provisioned', 'Faculty account authorized with temporary credentials.', 'emerald');
         }}
         terms={terms}
+      />
+
+      <MfaEnrollmentModal
+        isOpen={mfaModalOpen}
+        onSuccess={() => {
+          setMfaModalOpen(false);
+          setAdminRefreshKey((k) => k + 1);
+        }}
       />
 
       <ToastNotifications />

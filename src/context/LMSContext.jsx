@@ -738,6 +738,23 @@ $$\\text{Attention}(Q, K, V) = \\text{softmax}\\left(\\frac{QK^T}{\\sqrt{d_k}}\\
     return { success: false, error: apiResult?.message || 'Invalid 2FA code.' };
   };
 
+  const handleMfaEnrolled = (updatedUser) => {
+    setUser((prev) => {
+      const merged = {
+        ...prev,
+        ...(updatedUser || {}),
+        isTwoFactorEnabled: true,
+        mfaSetupRequired: false
+      };
+      try {
+        localStorage.setItem('lumina_current_user', JSON.stringify(merged));
+      } catch {}
+      return merged;
+    });
+    triggerConfetti();
+    addToast('2FA Enrollment Verified', 'Multi-factor authentication is active on your privileged account.', 'emerald');
+  };
+
   const handleForcedPasswordChange = async (newPassword, confirmPassword) => {
     const res = await apiService.changePassword(newPassword, confirmPassword);
     if (res && res.success) {
@@ -1122,6 +1139,8 @@ $$\\text{Attention}(Q, K, V) = \\text{softmax}\\left(\\frac{QK^T}{\\sqrt{d_k}}\\
         updatePortalConfig,
         user,
         setUser,
+        handleMfaEnrolled,
+        handleVerify2FA,
         students,
         login,
         logout,
