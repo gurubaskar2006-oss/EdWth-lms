@@ -7,7 +7,7 @@ import Editor from '@monaco-editor/react';
 export const CodingPanelDrawer = () => {
   const { codingPanelOpen, setCodingPanelOpen, addToast } = useLMS();
   const [language, setLanguage] = useState('python');
-  const [code, setCode] = useState('print("Hello from Lumina Piston!")');
+  const [code, setCode] = useState('print("Hello from EdWth Piston!")');
   const [output, setOutput] = useState('');
   const [isRunning, setIsRunning] = useState(false);
   
@@ -90,7 +90,7 @@ export const CodingPanelDrawer = () => {
   };
 
   const templates = {
-    python: 'print("Hello from Lumina Piston!")',
+    python: 'print("Hello from EdWth Piston!")',
     c: '#include <stdio.h>\n\nint main() {\n    printf("Hello from C!\\n");\n    return 0;\n}',
     cpp: '#include <iostream>\n\nint main() {\n    std::cout << "Hello from C++!" << std::endl;\n    return 0;\n}',
     java: 'public class Main {\n    public static void main(String[] args) {\n        System.out.println("Hello from Java!");\n    }\n}'

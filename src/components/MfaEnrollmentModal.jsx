@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { apiService } from '../services/apiService';
 import { useLMS } from '../context/LMSContext';
+import { BrandLogo } from './BrandLogo';
 import {
   ShieldCheck,
   ShieldAlert,
@@ -163,11 +164,14 @@ export const MfaEnrollmentModal = ({ isOpen, onSuccess }) => {
             <ShieldCheck size={26} color="#F58212" />
           </div>
           <div style={{ flex: 1 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <h2 style={{ fontSize: '1.18rem', fontWeight: 800, color: 'var(--text-primary, #FFFFFF)', margin: 0, letterSpacing: '0.01em' }}>
-                Privileged MFA Enrollment Required
-              </h2>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.2rem' }}>
+              <span style={{ fontSize: '0.65rem', fontWeight: 800, color: '#F58212', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+                EdWth Academy • Security Enforcement
+              </span>
             </div>
+            <h2 style={{ fontSize: '1.18rem', fontWeight: 800, color: 'var(--text-primary, #FFFFFF)', margin: 0, letterSpacing: '0.01em' }}>
+              Privileged MFA Enrollment Required
+            </h2>
             <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary, #94A3B8)', margin: '4px 0 0' }}>
               SuperAdmin access requires mandatory two-factor authentication before unlocking administrative controls.
             </p>

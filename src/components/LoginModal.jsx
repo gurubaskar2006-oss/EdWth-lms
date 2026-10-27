@@ -1,5 +1,12 @@
+/**
+ * EdWth LMS Authentication Modal
+ * Brand: EdWth Academy
+ * Tagline: Empowering Every Learner
+ * Asset: /logo-transparent.png
+ */
 import React, { useState, useEffect } from 'react';
 import { useLMS } from '../context/LMSContext';
+import { BrandLogo } from './BrandLogo';
 import {
   X,
   Lock,
@@ -197,62 +204,13 @@ export const LoginModal = ({ isOpen, onClose }) => {
 
         {/* Brand Header */}
         <div style={{ textAlign: 'center', marginBottom: '1.75rem' }}>
-          <div
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              width: '54px',
-              height: '54px',
-              borderRadius: '14px',
-              backgroundColor: '#171717',
-              border: '1.5px solid rgba(245, 130, 18, 0.45)',
-              boxShadow: '0 6px 18px -3px rgba(245, 130, 18, 0.35)',
-              marginBottom: '0.75rem',
-              padding: '6px',
-              overflow: 'hidden'
-            }}
-          >
-            <img
-              src="/logo-transparent.png"
-              alt="EdWth Academy"
-              style={{ width: '100%', height: '100%', objectFit: 'contain' }}
-              onError={(e) => {
-                e.currentTarget.style.display = 'none';
-                if (e.currentTarget.parentElement) {
-                  e.currentTarget.parentElement.innerHTML = '<span style="font-size:1.3rem;font-weight:900;color:#F58212;">E</span>';
-                }
-              }}
-            />
-          </div>
-          <h2
-            style={{
-              fontSize: '1.55rem',
-              fontWeight: 800,
-              color: 'var(--text-primary)',
-              letterSpacing: '-0.02em',
-              margin: 0
-            }}
-          >
-            EdWth LMS
-          </h2>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.4rem', marginTop: '0.25rem' }}>
-            <span
-              style={{
-                fontSize: '0.7rem',
-                fontWeight: 700,
-                letterSpacing: '0.06em',
-                textTransform: 'uppercase',
-                color: '#F58212',
-                backgroundColor: 'rgba(245, 130, 18, 0.12)',
-                padding: '0.1rem 0.45rem',
-                borderRadius: '9999px',
-                border: '1px solid rgba(245, 130, 18, 0.25)'
-              }}
-            >
-              EdWth Academy
-            </span>
-          </div>
+          <BrandLogo
+            variant="full"
+            size="md"
+            productBadge="LMS"
+            subtitle="Sign In to Your Workspace"
+            showTagline={true}
+          />
           <p
             style={{
               fontSize: '0.86rem',

@@ -21,9 +21,11 @@ const router = express.Router();
 
 /**
  * Validates that tenantId is a proper ObjectId and MongoDB is connected.
- * Returns { tenantId } or sends a 403/503 response and returns null.
+ * - For normal users and institution admins: enforces strict req.tenantId.
+ * - For superadmin: allows cross-tenant query or specific tenant via req.query.tenantId.
+ * Returns { filter } object or sends a 403/503 response and returns null.
  */
-const requireTenantContext = (req, res) => {
+const getTenantQueryFilter = (req, res) => {
   if (mongoose.connection.readyState !== 1) {
     res.status(503).json({
       success: false,
@@ -32,10 +34,15 @@ const requireTenantContext = (req, res) => {
     return null;
   }
 
+  if (req.user && req.user.role === 'superadmin') {
+    if (req.query.tenantId && mongoose.Types.ObjectId.isValid(req.query.tenantId)) {
+      return { tenantId: req.query.tenantId };
+    }
+    return {}; // Cross-tenant company oversight for superadmin
+  }
+
   const tenantId = req.tenantId;
   if (!tenantId || !mongoose.Types.ObjectId.isValid(tenantId)) {
-    // This should never happen for a properly authenticated user, but we
-    // never silently fall back to an unrestricted query — always fail closed.
     res.status(403).json({
       success: false,
       error: {
@@ -46,16 +53,16 @@ const requireTenantContext = (req, res) => {
     return null;
   }
 
-  return tenantId;
+  return { tenantId };
 };
 
 // GET /api/v1/data/courses
 router.get('/courses', protect, async (req, res) => {
   try {
-    const tenantId = requireTenantContext(req, res);
-    if (!tenantId) return;
+    const filter = getTenantQueryFilter(req, res);
+    if (!filter) return;
 
-    const courses = await Course.find({ tenantId }).lean();
+    const courses = await Course.find(filter).lean();
     return res.json(courses);
   } catch (error) {
     console.error('[DataRoutes] /courses error:', error.message);
@@ -69,10 +76,10 @@ router.get('/courses', protect, async (req, res) => {
 // GET /api/v1/data/assignments
 router.get('/assignments', protect, async (req, res) => {
   try {
-    const tenantId = requireTenantContext(req, res);
-    if (!tenantId) return;
+    const filter = getTenantQueryFilter(req, res);
+    if (!filter) return;
 
-    const assignments = await Assignment.find({ tenantId }).lean();
+    const assignments = await Assignment.find(filter).lean();
     return res.json(assignments);
   } catch (error) {
     console.error('[DataRoutes] /assignments error:', error.message);
@@ -86,8 +93,12 @@ router.get('/assignments', protect, async (req, res) => {
 // GET /api/v1/data/grades
 router.get('/grades', protect, async (req, res) => {
   try {
-    const tenantId = requireTenantContext(req, res);
-    if (!tenantId) return;
+    if (req.user?.role === 'superadmin' && !req.user?.studentId) {
+      return res.json(null);
+    }
+
+    const filter = getTenantQueryFilter(req, res);
+    if (!filter) return;
 
     if (!req.user?.studentId) {
       return res.status(400).json({
@@ -99,7 +110,7 @@ router.get('/grades', protect, async (req, res) => {
     // Always scope by both studentId AND tenantId — never trust one alone
     const grades = await Grade.findOne({
       studentId: req.user.studentId,
-      tenantId
+      ...filter
     }).lean();
 
     return res.json(grades || null);

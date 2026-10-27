@@ -424,8 +424,7 @@ export const AcademicStructureView = () => {
 
   useEffect(() => {
     let mounted = true;
-    apiService._fetch('/api/v1/admin/batches')
-      .then((r) => (r.ok ? r.json() : null))
+    apiService.getAdminBatches()
       .then((data) => {
         if (mounted && data?.batches && Array.isArray(data.batches)) {
           setBatches(data.batches);
@@ -744,7 +743,7 @@ export const AnnouncementsOpsView = () => {
     try {
       const [annRes, batchRes] = await Promise.all([
         apiService.getAdminAnnouncements(),
-        apiService._fetch('/api/v1/admin/batches').then(r => r.ok ? r.json() : null).catch(() => null)
+        apiService.getAdminBatches().catch(() => null)
       ]);
       if (annRes?.success && Array.isArray(annRes.announcements)) {
         setAnnouncements(annRes.announcements);
@@ -1279,8 +1278,7 @@ export const OperationsReportsView = () => {
   const exportBatches = async () => {
     try {
       setExporting('batches');
-      const res = await apiService._fetch('/api/v1/admin/batches');
-      const data = await res.json();
+      const data = await apiService.getAdminBatches();
       const batches = data?.batches || [];
       if (batches.length === 0) {
         addToast('Export Notice', 'No batch records available to export.', 'amber');

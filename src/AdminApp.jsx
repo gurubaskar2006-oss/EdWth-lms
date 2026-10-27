@@ -9,6 +9,7 @@ import { SettingsView } from './views/SettingsView';
 import { UnauthenticatedView } from './components/UnauthenticatedView';
 import { MultiSchoolManagementView } from './views/MultiSchoolManagementView';
 import { MfaEnrollmentModal } from './components/MfaEnrollmentModal';
+import { BrandLogo } from './components/BrandLogo';
 import { apiService } from './services/apiService';
 import {
   InstitutionAnalyticsView,
@@ -86,22 +87,18 @@ const CreateBatchModal = ({ isOpen, onClose, onCreated, terms }) => {
     setError('');
 
     try {
-      const res = await apiService._fetch('/api/v1/admin/batches', {
-        method: 'POST',
-        body: JSON.stringify({
-          name: name.trim(),
-          code: code.trim().toUpperCase(),
-          department,
-          semester,
-          maxCapacity: parseInt(maxCapacity) || 35
-        })
+      const data = await apiService.createAdminBatch({
+        name: name.trim(),
+        code: code.trim().toUpperCase(),
+        department,
+        semester,
+        maxCapacity: parseInt(maxCapacity) || 35
       });
-      const data = await res.json();
-      if (res.ok && data.success) {
+      if (data && data.success) {
         onCreated(data.batch);
         onClose();
       } else {
-        setError(data.message || 'Failed to create batch.');
+        setError(data?.message || 'Failed to create batch.');
       }
     } catch {
       setError('Network error while creating batch.');
@@ -245,24 +242,20 @@ const ProvisionTrainerModal = ({ isOpen, onClose, onCreated, terms }) => {
     setError('');
 
     try {
-      const res = await apiService._fetch('/api/v1/admin/trainers', {
-        method: 'POST',
-        body: JSON.stringify({
-          name: name.trim(),
-          email: email.trim().toLowerCase(),
-          department,
-          password
-        })
+      const data = await apiService.createAdminTrainer({
+        name: name.trim(),
+        email: email.trim().toLowerCase(),
+        department,
+        password
       });
-      const data = await res.json();
-      if (res.ok && data.success) {
+      if (data && data.success) {
         onCreated(data.trainer);
         setCreatedResult({
           trainer: data.trainer,
           temporaryPassword: data.temporaryPassword || password
         });
       } else {
-        setError(data.message || 'Failed to provision trainer.');
+        setError(data?.message || 'Failed to provision trainer.');
       }
     } catch {
       setError('Network error while provisioning trainer.');
@@ -735,8 +728,7 @@ const CollegeManagementView = ({ onOpenCreateBatch }) => {
 
   const fetchBatches = () => {
     setLoading(true);
-    apiService._fetch('/api/v1/admin/batches')
-      .then(r => r.ok ? r.json() : null)
+    apiService.getAdminBatches()
       .then(data => { if (data?.batches) setBatches(data.batches); })
       .catch(() => {})
       .finally(() => setLoading(false));
@@ -875,8 +867,7 @@ const TrainerProvisioningView = ({ onOpenProvisionTrainer }) => {
 
   const fetchTrainers = () => {
     setLoading(true);
-    apiService._fetch('/api/v1/admin/trainers')
-      .then(r => r.ok ? r.json() : null)
+    apiService.getAdminTrainers()
       .then(data => { if (data?.trainers) setTrainers(data.trainers); })
       .catch(() => {})
       .finally(() => setLoading(false));
@@ -1112,42 +1103,13 @@ export const AdminApp = () => {
     <div className="app-container">
       {/* Admin Sidebar with Clean Structured Styling */}
       <aside className="sidebar">
-        <div className="sidebar-header" style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-          <div style={{
-            width: '40px',
-            height: '40px',
-            borderRadius: '10px',
-            backgroundColor: '#171717',
-            border: '1px solid #FFB21A33',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            boxShadow: '0 3px 10px rgba(245, 130, 18, 0.25)',
-            overflow: 'hidden',
-            flexShrink: 0
-          }}>
-            <img
-              src="/logo-transparent.png"
-              alt="EdWth LMS"
-              onError={(e) => {
-                e.currentTarget.style.display = 'none';
-                if (e.currentTarget.nextSibling) e.currentTarget.nextSibling.style.display = 'block';
-              }}
-              style={{ width: '30px', height: '30px', objectFit: 'contain' }}
-            />
-            <Shield size={20} color="#F58212" style={{ display: 'none' }} />
-          </div>
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-              <h2 style={{ color: 'var(--text-primary)', fontWeight: 800, fontSize: '0.95rem', margin: 0, letterSpacing: '0.03em' }}>EDWTH LMS</h2>
-              <span style={{ fontSize: '0.62rem', padding: '0.1rem 0.35rem', borderRadius: '4px', backgroundColor: isSuperAdmin ? 'rgba(245, 130, 18, 0.15)' : 'rgba(245, 158, 11, 0.15)', color: '#F58212', fontWeight: 700 }}>
-                {isSuperAdmin ? 'SUPER ADMIN' : 'INSTITUTION ADMIN'}
-              </span>
-            </div>
-            <div style={{ fontSize: '0.68rem', fontWeight: 600, color: 'var(--text-secondary)', marginTop: '1px' }}>
-              {isSuperAdmin ? 'EdWth Academy' : (user?.tenantName || 'Institution Administration')}
-            </div>
-          </div>
+        <div className="sidebar-header" style={{ padding: '1.25rem 1rem 1rem' }}>
+          <BrandLogo
+            variant="header"
+            productBadge={isSuperAdmin ? 'SUPER ADMIN' : 'INSTITUTION ADMIN'}
+            subtitle={isSuperAdmin ? 'EdWth Academy • Central Operations' : (user?.tenantName || 'Institution Administration')}
+            showTagline={isSuperAdmin}
+          />
         </div>
 
         <nav className="sidebar-nav">

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useLMS } from '../context/LMSContext';
+import { BrandLogo } from './BrandLogo';
 import {
   LayoutDashboard,
   BookOpen,
@@ -185,36 +186,14 @@ export const Sidebar = () => {
       >
         {/* Top: EdWth Brand */}
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.85rem', width: '100%' }}>
-          <button
+          <BrandLogo
+            variant="symbol"
+            size="md"
             onClick={() => {
               setActiveTab('dashboard');
               setSelectedCatId('home');
             }}
-            title="EdWth LMS — Empowering Every Learner"
-            style={{
-              width: '42px',
-              height: '42px',
-              borderRadius: '12px',
-              backgroundColor: '#171717',
-              border: '1px solid #FFB21A44',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              boxShadow: '0 3px 10px rgba(245, 130, 18, 0.28)',
-              cursor: 'pointer',
-              padding: '4px',
-              overflow: 'hidden'
-            }}
-          >
-            <img
-              src="/logo-transparent.png"
-              alt="EdWth LMS"
-              style={{ width: '32px', height: '32px', objectFit: 'contain' }}
-              onError={(e) => {
-                e.currentTarget.style.display = 'none';
-              }}
-            />
-          </button>
+          />
 
           <div style={{ width: '32px', height: '1px', backgroundColor: 'var(--border-subtle)' }} />
 

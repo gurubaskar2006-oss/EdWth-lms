@@ -3,25 +3,74 @@ const API_BASE_URL = `${BACKEND_URL}/api/v1`;
 
 let sessionExpiredDebounce = 0;
 
+/**
+ * Universal token resolver: checks lumina_auth_token, token, jwt, and sessionStorage.
+ */
+export const getAuthToken = () => {
+  try {
+    if (typeof window === 'undefined') return null;
+    return (
+      localStorage.getItem('lumina_auth_token') ||
+      localStorage.getItem('token') ||
+      localStorage.getItem('jwt') ||
+      sessionStorage.getItem('lumina_auth_token') ||
+      sessionStorage.getItem('token') ||
+      null
+    );
+  } catch {
+    return null;
+  }
+};
+
+export const setAuthToken = (token) => {
+  try {
+    if (typeof window === 'undefined') return;
+    if (token) {
+      localStorage.setItem('lumina_auth_token', token);
+    } else {
+      localStorage.removeItem('lumina_auth_token');
+    }
+  } catch {}
+};
+
+/**
+ * Normalizes relative and absolute API request targets against the configured backend.
+ */
+export const normalizeApiUrl = (url) => {
+  if (typeof url !== 'string') return url;
+  if (url.startsWith('http://') || url.startsWith('https://')) {
+    return url;
+  }
+  if (url.startsWith('/api/')) {
+    return BACKEND_URL ? `${BACKEND_URL}${url}` : url;
+  }
+  const cleanPath = url.startsWith('/') ? url : `/${url}`;
+  return `${API_BASE_URL}${cleanPath}`;
+};
+
 export const apiService = {
   // Use credentials to send httpOnly cookies automatically and include Bearer token
   _fetch: async (url, options = {}) => {
-    const token = localStorage.getItem('lumina_auth_token');
+    const targetUrl = normalizeApiUrl(url);
+    const token = getAuthToken();
     const authHeader = token ? { 'Authorization': `Bearer ${token}` } : {};
 
-    const res = await fetch(url, {
+    const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData;
+    const defaultHeaders = isFormData ? {} : { 'Content-Type': 'application/json' };
+
+    const res = await fetch(targetUrl, {
       ...options,
       credentials: 'include',
       headers: {
-        'Content-Type': 'application/json',
+        ...defaultHeaders,
         ...authHeader,
         ...options.headers,
       }
     });
 
-    if (res.status === 401 && !url.includes('/auth/login') && !url.includes('/students/datasheet')) {
+    if (res.status === 401 && !targetUrl.includes('/auth/login') && !targetUrl.includes('/auth/profile') && !targetUrl.includes('/students/datasheet')) {
       const isUserCached = !!localStorage.getItem('lumina_current_user');
-      const hasToken = !!localStorage.getItem('lumina_auth_token');
+      const hasToken = !!getAuthToken();
       const now = Date.now();
       // Only dispatch session expired if the user was actively authenticated with a token and throttle by 5 seconds
       if (isUserCached && hasToken && now - sessionExpiredDebounce > 5000) {
@@ -30,7 +79,7 @@ export const apiService = {
       }
     }
 
-    if (res.status === 403 && !url.includes('/auth/2fa')) {
+    if (res.status === 403 && !targetUrl.includes('/auth/2fa')) {
       try {
         const clone = res.clone();
         clone.json().then(data => {
@@ -114,13 +163,39 @@ export const apiService = {
   async getProfile() {
     try {
       const res = await this._fetch(`${API_BASE_URL}/auth/profile`);
+      let data = null;
+      try {
+        data = await res.json();
+      } catch (_) {}
+
       if (res.ok) {
-        return await res.json();
+        return {
+          success: true,
+          status: res.status,
+          user: data?.user || data,
+          ...data
+        };
       }
-      return await res.json().catch(() => ({ success: false, message: 'Failed to fetch student profile.' }));
+
+      return {
+        success: false,
+        status: res.status,
+        isAuthError: res.status === 401,
+        isForbidden: res.status === 403,
+        isServerError: res.status >= 500,
+        isNetworkError: false,
+        message: data?.message || (res.status === 401 ? 'Session expired or invalid token' : `Request failed with status ${res.status}`)
+      };
     } catch (e) {
       console.error('getProfile error:', e);
-      return { success: false, message: 'Network error fetching profile.' };
+      return {
+        success: false,
+        status: 0,
+        isAuthError: false,
+        isServerError: false,
+        isNetworkError: true,
+        message: 'Network error fetching profile'
+      };
     }
   },
 
@@ -151,16 +226,6 @@ export const apiService = {
     } catch (e) {
       console.error('Failed to fetch datasheet:', e);
       return null;
-    }
-  },
-
-  async getTrainerStudents() {
-    try {
-      const res = await this._fetch(`${API_BASE_URL}/trainer/students`);
-      return await res.json();
-    } catch (e) {
-      console.error('Failed to fetch trainer students:', e);
-      return { success: false, students: [] };
     }
   },
 
@@ -215,11 +280,21 @@ export const apiService = {
     }
   },
 
-  async resetStudentPassword(studentId) {
+  async resetStudentPassword(studentId, newPassword) {
     try {
+      const payload = newPassword ? { newPassword } : undefined;
       const res = await this._fetch(`${API_BASE_URL}/students/${studentId}/reset-password`, {
         method: 'POST',
+        ...(payload ? { body: JSON.stringify(payload) } : {})
       });
+      if (res.status === 404) {
+        // Fallback to trainer route if student record is scoped under trainer endpoint
+        const fallbackRes = await this._fetch(`${API_BASE_URL}/trainer/students/${studentId}/reset-password`, {
+          method: 'POST',
+          ...(payload ? { body: JSON.stringify(payload) } : {})
+        });
+        return await fallbackRes.json();
+      }
       return await res.json();
     } catch (e) {
       console.error('Reset password error:', e);
@@ -301,16 +376,8 @@ export const apiService = {
 
   async uploadNoteFile(formData) {
     try {
-      const headers = {};
-      const token = localStorage.getItem('lumina_auth_token') || localStorage.getItem('token') || localStorage.getItem('jwt');
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
-      }
-      // For FormData, omit Content-Type so browser sets boundary
-      const res = await fetch(`${API_BASE_URL}/notes/upload`, {
+      const res = await this._fetch(`${API_BASE_URL}/notes/upload`, {
         method: 'POST',
-        credentials: 'include',
-        headers,
         body: formData,
       });
       return await res.json();
@@ -463,7 +530,7 @@ export const apiService = {
       return await res.json();
     } catch (e) {
       console.error('getTrainerStudents error:', e);
-      return { success: false, message: 'Network error fetching trainer students' };
+      return { success: false, students: [], message: 'Network error fetching trainer students' };
     }
   },
 
@@ -667,29 +734,6 @@ export const apiService = {
     }
   },
 
-  async getTrainerHomework() {
-    try {
-      const res = await this._fetch(`${API_BASE_URL}/trainer/homework`);
-      return await res.json();
-    } catch (e) {
-      console.error('getTrainerHomework error:', e);
-      return { success: false, assignments: [] };
-    }
-  },
-
-  async createTrainerHomework(payload) {
-    try {
-      const res = await this._fetch(`${API_BASE_URL}/trainer/homework`, {
-        method: 'POST',
-        body: JSON.stringify(payload)
-      });
-      return await res.json();
-    } catch (e) {
-      console.error('createTrainerHomework error:', e);
-      return { success: false, message: 'Network error publishing homework' };
-    }
-  },
-
   async gradeSubmission(submissionId, payload) {
     try {
       const res = await this._fetch(`${API_BASE_URL}/trainer/assignments/${submissionId}/grade`, {
@@ -710,24 +754,6 @@ export const apiService = {
     } catch (e) {
       console.error('getTrainerClasses error:', e);
       return { success: false, classes: [] };
-    }
-  },
-
-  async getTrainerAnalytics() {
-    try {
-      const res = await this._fetch(`${API_BASE_URL}/trainer/analytics`);
-      if (!res.ok) {
-        let msg = `HTTP ${res.status}`;
-        try {
-          const body = await res.json();
-          if (body?.message) msg = body.message;
-        } catch (_) {}
-        throw new Error(msg);
-      }
-      return await res.json();
-    } catch (e) {
-      console.error('getTrainerAnalytics error:', e);
-      throw e;
     }
   },
 
@@ -1082,16 +1108,6 @@ export const apiService = {
     }
   },
 
-  async getStorageDownloadUrl(s3Key) {
-    try {
-      const res = await this._fetch(`${API_BASE_URL}/storage/download?key=${encodeURIComponent(s3Key)}`);
-      return await res.json();
-    } catch (e) {
-      console.error('getStorageDownloadUrl error:', e);
-      return { success: false, message: 'Network error retrieving download link' };
-    }
-  },
-
   // ─── Admin Endpoints (6th Civilians Corporation Governance) ────────────────
   async getAdminOverview() {
     try {
@@ -1113,6 +1129,19 @@ export const apiService = {
     }
   },
 
+  async createAdminBatch(payload) {
+    try {
+      const res = await this._fetch(`${API_BASE_URL}/admin/batches`, {
+        method: 'POST',
+        body: JSON.stringify(payload)
+      });
+      return await res.json();
+    } catch (e) {
+      console.error('createAdminBatch error:', e);
+      return { success: false, message: 'Network error creating batch' };
+    }
+  },
+
   async getAdminTrainers() {
     try {
       const res = await this._fetch(`${API_BASE_URL}/admin/trainers`);
@@ -1120,6 +1149,52 @@ export const apiService = {
     } catch (e) {
       console.error('getAdminTrainers error:', e);
       return { success: false, trainers: [] };
+    }
+  },
+
+  async createAdminTrainer(payload) {
+    try {
+      const res = await this._fetch(`${API_BASE_URL}/admin/trainers`, {
+        method: 'POST',
+        body: JSON.stringify(payload)
+      });
+      return await res.json();
+    } catch (e) {
+      console.error('createAdminTrainer error:', e);
+      return { success: false, message: 'Network error provisioning trainer' };
+    }
+  },
+
+  async getTrainerAnalytics() {
+    try {
+      const res = await this._fetch(`${API_BASE_URL}/trainer/analytics`);
+      return await res.json();
+    } catch (e) {
+      console.error('getTrainerAnalytics error:', e);
+      return { success: false, message: 'Network error fetching trainer analytics' };
+    }
+  },
+
+  async getTrainerSubmissions() {
+    try {
+      const res = await this._fetch(`${API_BASE_URL}/trainer/submissions`);
+      return await res.json();
+    } catch (e) {
+      console.error('getTrainerSubmissions error:', e);
+      return { success: false, submissions: [] };
+    }
+  },
+
+  async gradeTrainerSubmission(submissionId, payload) {
+    try {
+      const res = await this._fetch(`${API_BASE_URL}/trainer/assignments/${submissionId}/grade`, {
+        method: 'POST',
+        body: JSON.stringify(payload)
+      });
+      return await res.json();
+    } catch (e) {
+      console.error('gradeTrainerSubmission error:', e);
+      return { success: false, message: 'Network error grading submission' };
     }
   },
 
@@ -1170,30 +1245,6 @@ export const apiService = {
     } catch (e) {
       console.error('getAdminAnalytics error:', e);
       return { success: false, message: 'Network error fetching admin analytics' };
-    }
-  },
-
-  // ─── Student Profile Self-Service ──────────────────────────────────────────
-  async getProfile() {
-    try {
-      const res = await this._fetch(`${API_BASE_URL}/auth/profile`);
-      return await res.json();
-    } catch (e) {
-      console.error('getProfile error:', e);
-      return { success: false, message: 'Network error fetching profile' };
-    }
-  },
-
-  async updateStudentProfile(payload) {
-    try {
-      const res = await this._fetch(`${API_BASE_URL}/auth/profile`, {
-        method: 'PUT',
-        body: JSON.stringify(payload)
-      });
-      return await res.json();
-    } catch (e) {
-      console.error('updateStudentProfile error:', e);
-      return { success: false, message: 'Network error saving student profile' };
     }
   },
 

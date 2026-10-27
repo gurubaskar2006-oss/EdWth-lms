@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useLMS } from '../context/LMSContext';
 import { Lock, ShieldAlert, Check, X, KeyRound, ArrowRight } from 'lucide-react';
+import { BrandLogo } from './BrandLogo';
 
 export const ForcedPasswordChangeModal = ({ isOpen }) => {
   const { handleForcedPasswordChange, logout, terms } = useLMS();
@@ -66,24 +67,17 @@ export const ForcedPasswordChangeModal = ({ isOpen }) => {
           borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
           textAlign: 'center'
         }}>
-          <div style={{
-            width: '54px',
-            height: '54px',
-            borderRadius: '14px',
-            background: 'linear-gradient(135deg, #F58212 0%, #FFB21A 100%)',
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            boxShadow: '0 10px 20px -5px rgba(245, 130, 18, 0.45)',
-            marginBottom: '1rem'
-          }}>
-            <KeyRound size={26} color="#ffffff" />
+          <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '0.85rem' }}>
+            <BrandLogo variant="symbol" size="lg" />
+          </div>
+          <div style={{ fontSize: '0.72rem', fontWeight: 800, color: '#F58212', letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: '0.35rem' }}>
+            EdWth Academy Security Protection
           </div>
           <h2 style={{ fontSize: '1.35rem', fontWeight: 800, margin: 0, letterSpacing: '-0.02em', color: '#ffffff' }}>
-            Create Your New Password
+            Create Your Permanent Password
           </h2>
           <p style={{ fontSize: '0.85rem', color: '#94a3b8', marginTop: '0.5rem', lineHeight: 1.5 }}>
-            Your account was issued a temporary credential by your {terms?.educatorLabel || 'educator'}. For your protection, you must establish a permanent secure password.
+            Your account was issued a temporary credential. For your protection, you must establish a permanent secure password before proceeding.
           </p>
         </div>
 

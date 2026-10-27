@@ -117,7 +117,7 @@ export const useFocusTimer = ({ triggerConfetti, addToast } = {}) => {
         'emerald'
       );
       sendBackgroundNotification(
-        'Lumina Focus Complete! 🎯',
+        'EdWth Academy Focus Complete! 🎯',
         `Great job! Time for a ${breakDuration}-minute break.`
       );
     } else {

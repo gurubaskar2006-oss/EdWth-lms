@@ -142,11 +142,8 @@ export const SchoolTeacherStudentsView = () => {
   const handleResetStudentPassword = async (studentId) => {
     setIsResettingPassword(true);
     try {
-      const res = await apiService._fetch(`/api/v1/trainer/students/${studentId}/reset-password`, {
-        method: 'POST'
-      });
-      const data = await res.json();
-      if (res.ok && data.success) {
+      const data = await apiService.resetStudentPassword(studentId);
+      if (data?.success) {
         addToast(
           'Password Reset',
           data.temporaryPassword
@@ -155,7 +152,7 @@ export const SchoolTeacherStudentsView = () => {
           'emerald'
         );
       } else {
-        addToast('Reset Failed', data.message || 'Could not reset password.', 'rose');
+        addToast('Reset Failed', data?.message || 'Could not reset password.', 'rose');
       }
     } catch (err) {
       addToast('Reset Error', 'Network error during password reset.', 'rose');

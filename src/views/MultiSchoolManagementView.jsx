@@ -151,8 +151,7 @@ export const MultiSchoolManagementView = () => {
       const studentsList = Array.isArray(res) ? res : (res?.data?.students || res?.students || []);
       setAllStudents(studentsList);
 
-      const trainersRes = await apiService._fetch('/api/v1/admin/trainers');
-      const trainersData = await trainersRes.json();
+      const trainersData = await apiService.getAdminTrainers();
       if (trainersData?.success && Array.isArray(trainersData.trainers)) {
         setAllTrainers(trainersData.trainers);
       }

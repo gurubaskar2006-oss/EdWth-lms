@@ -46,7 +46,7 @@ const TOPOLOGY_NODES = [
   },
   {
     id: 'api',
-    title: 'Lumina API Cluster (Stateless)',
+    title: 'EdWth API Cluster (Stateless)',
     layer: 'Compute / Application',
     icon: Server,
     color: '#10b981',
@@ -200,7 +200,7 @@ export const ArchitectureView = () => {
               6th Civilians Corporation
             </span>
             <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-              Production Infrastructure Blueprint • Lumina LMS V3
+              Production Infrastructure Blueprint • EdWth Academy LMS
             </span>
           </div>
           <h2 style={{ fontSize: '1.8rem', color: 'var(--text-primary)', fontWeight: 800, letterSpacing: '-0.02em', margin: 0 }}>

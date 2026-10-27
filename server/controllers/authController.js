@@ -9,6 +9,7 @@ import crypto from 'crypto';
 import { createAuditLog, createCriticalAuditLog } from '../utils/auditLogger.js';
 import { getJwtSecret } from '../config/environment.js';
 import { setAuthCookie, clearAuthCookie } from '../utils/cookieHelper.js';
+import { decryptTotpSecret, encryptTotpSecret, isEncrypted } from '../utils/mfaCrypto.js';
 
 /**
  * Escape special characters before using user input in a MongoDB $regex.
@@ -338,6 +339,9 @@ export const updateProfile = async (req, res) => {
       'mustChangePassword',
       'twoFactorSecret',
       'twoFactorBackupCodes',
+      'pendingTwoFactorSecret',
+      'pendingTwoFactorBackupCodes',
+      'pendingTwoFactorCreatedAt',
       'soft_deleted',
       'joinedDate',
       'lastLogin',
@@ -480,34 +484,145 @@ export const updateProfile = async (req, res) => {
 
 export const setup2FA = async (req, res) => {
   try {
-    const user = await User.findById(req.user._id);
-    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
-    
-    // Generate secret
-    const secret = speakeasy.generateSecret({ name: `EdWth LMS (${user.email})`, issuer: 'EdWth Academy' });
-    user.twoFactorSecret = secret.base32;
-    
-    // Generate backup codes
-    const backupCodes = Array.from({ length: 5 }, () => crypto.randomBytes(4).toString('hex'));
-    // SECURITY: Hash each backup code before storage — never store plaintext codes in DB
-    const hashedCodes = await Promise.all(
-      backupCodes.map(code => bcrypt.hash(code, 12))
+    const user = await User.findById(req.user._id).select(
+      '+password +twoFactorSecret +twoFactorBackupCodes +pendingTwoFactorSecret +pendingTwoFactorBackupCodes'
     );
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+
+    // REAUTHENTICATION GATEWAY: If user is already enrolled, block silent replacement!
+    if (user.isTwoFactorEnabled) {
+      const currentPassword = req.body.currentPassword || req.body.password;
+      const currentToken = (
+        req.body.currentToken ||
+        req.body.currentCode ||
+        req.body.currentOtp ||
+        req.body.code ||
+        req.body.token ||
+        req.body.backupCode ||
+        ''
+      ).trim();
+
+      if (!currentPassword || !currentToken) {
+        return res.status(403).json({
+          success: false,
+          code: 'MFA_ALREADY_ENROLLED',
+          message: 'Two-factor authentication is already enrolled for this account. Current password and active MFA code (or recovery backup code) are required to reconfigure MFA.'
+        });
+      }
+
+      // 1. Verify current password
+      const isPasswordValid = await bcrypt.compare(currentPassword, user.password).catch(() => false);
+      if (!isPasswordValid) {
+        createAuditLog({
+          tenantId: user.tenantId || null,
+          actor: { userId: user._id, role: user.role, email: user.email },
+          action: 'AUTH_2FA_RECONFIG_FAILED',
+          details: { reason: 'invalid_password' }
+        });
+        return res.status(401).json({ success: false, message: 'Current password verification failed.' });
+      }
+
+      // 2. Verify current second factor (either active TOTP or active backup code)
+      let isSecondFactorValid = false;
+      let usedBackupHash = null;
+
+      if (user.twoFactorSecret) {
+        try {
+          const plainActiveSecret = decryptTotpSecret(user.twoFactorSecret);
+          isSecondFactorValid = speakeasy.totp.verify({
+            secret: plainActiveSecret,
+            encoding: 'base32',
+            token: currentToken,
+            window: 1
+          });
+        } catch (decErr) {
+          console.error('[setup2FA] Decrypt error on active secret:', decErr.message);
+        }
+      }
+
+      if (!isSecondFactorValid && user.twoFactorBackupCodes && user.twoFactorBackupCodes.length > 0) {
+        for (const codeHash of user.twoFactorBackupCodes) {
+          const isCodeMatch = await bcrypt.compare(currentToken, codeHash).catch(() => false);
+          if (isCodeMatch) {
+            isSecondFactorValid = true;
+            usedBackupHash = codeHash;
+            break;
+          }
+        }
+      }
+
+      if (!isSecondFactorValid) {
+        createAuditLog({
+          tenantId: user.tenantId || null,
+          actor: { userId: user._id, role: user.role, email: user.email },
+          action: 'AUTH_2FA_RECONFIG_FAILED',
+          details: { reason: 'invalid_second_factor' }
+        });
+        return res.status(401).json({ success: false, message: 'Invalid current two-factor authentication or backup code.' });
+      }
+
+      // Re-authentication verified: Stage replacement without disabling existing MFA
+      const secret = speakeasy.generateSecret({ name: `EdWth LMS (${user.email})`, issuer: 'EdWth Academy' });
+      const backupCodes = Array.from({ length: 5 }, () => crypto.randomBytes(4).toString('hex'));
+      const hashedCodes = await Promise.all(backupCodes.map(code => bcrypt.hash(code, 12)));
+
+      user.pendingTwoFactorSecret = encryptTotpSecret(secret.base32);
+      user.pendingTwoFactorBackupCodes = hashedCodes;
+      user.pendingTwoFactorCreatedAt = new Date();
+
+      // If a backup code was used for re-authentication, consume it atomically
+      if (usedBackupHash) {
+        await User.updateOne({ _id: user._id }, { $pull: { twoFactorBackupCodes: usedBackupHash } });
+        user.twoFactorBackupCodes = user.twoFactorBackupCodes.filter(h => h !== usedBackupHash);
+      }
+
+      // CRITICAL: user.isTwoFactorEnabled remains true!
+      // Active secret and active backup codes remain valid until the replacement is verified!
+      await user.save();
+
+      createAuditLog({
+        tenantId: user.tenantId || null,
+        actor: { userId: user._id, role: user.role, email: user.email },
+        action: 'AUTH_2FA_RECONFIG_INITIATED',
+        details: { method: usedBackupHash ? 'recovery_code' : 'totp' }
+      });
+
+      qrcode.toDataURL(secret.otpauth_url, (err, data_url) => {
+        if (err) return res.status(500).json({ success: false, message: 'QR Generation failed' });
+        res.json({
+          success: true,
+          secret: secret.base32,
+          qrCode: data_url,
+          backupCodes,
+          isReconfiguration: true
+        });
+      });
+      return;
+    }
+
+    // INITIAL ENROLLMENT FLOW (user.isTwoFactorEnabled === false)
+    const secret = speakeasy.generateSecret({ name: `EdWth LMS (${user.email})`, issuer: 'EdWth Academy' });
+    const backupCodes = Array.from({ length: 5 }, () => crypto.randomBytes(4).toString('hex'));
+    const hashedCodes = await Promise.all(backupCodes.map(code => bcrypt.hash(code, 12)));
+
+    // Store encrypted TOTP secret at rest
+    user.twoFactorSecret = encryptTotpSecret(secret.base32);
     user.twoFactorBackupCodes = hashedCodes;
-    // CRITICAL SECURITY FIX: Generating a TOTP secret or QR code must NOT activate MFA.
-    // user.isTwoFactorEnabled remains false until a valid code is verified.
     user.isTwoFactorEnabled = false;
-    
+    user.pendingTwoFactorSecret = undefined;
+    user.pendingTwoFactorBackupCodes = undefined;
+    user.pendingTwoFactorCreatedAt = undefined;
+
     await user.save();
-    
-    // Generate QR Code — plaintext backupCodes returned only once to user at setup
+
     qrcode.toDataURL(secret.otpauth_url, (err, data_url) => {
       if (err) return res.status(500).json({ success: false, message: 'QR Generation failed' });
       res.json({
         success: true,
         secret: secret.base32,
         qrCode: data_url,
-        backupCodes
+        backupCodes,
+        isReconfiguration: false
       });
     });
   } catch (error) {
@@ -563,24 +678,49 @@ export const verify2FA = async (req, res) => {
       return res.status(401).json({ success: false, message: 'Authentication or preAuthToken required for 2FA verification.' });
     }
 
-    const user = await User.findById(userId);
+    const user = await User.findById(userId).select(
+      '+password +twoFactorSecret +twoFactorBackupCodes +pendingTwoFactorSecret +pendingTwoFactorBackupCodes'
+    );
     if (!user) return res.status(404).json({ success: false, message: 'User not found.' });
 
-    if (!user.twoFactorSecret) {
+    if (!user.twoFactorSecret && !user.pendingTwoFactorSecret) {
       return res.status(400).json({ success: false, message: '2FA has not been initiated for this account. Run setup first.' });
     }
 
-    // Verify TOTP token
-    const verified = speakeasy.totp.verify({
-      secret: user.twoFactorSecret,
-      encoding: 'base32',
-      token: userToken,
-      window: 1
-    });
+    let isValid = false;
+    let isPendingRotation = false;
 
-    let isValid = verified;
+    // STEP 1: If user has a pending replacement secret, verify against it
+    if (user.pendingTwoFactorSecret) {
+      try {
+        const pendingPlain = decryptTotpSecret(user.pendingTwoFactorSecret);
+        if (speakeasy.totp.verify({ secret: pendingPlain, encoding: 'base32', token: userToken, window: 1 })) {
+          isValid = true;
+          isPendingRotation = true;
+        }
+      } catch (err) {
+        console.error('[verify2FA] Error decrypting pending secret:', err.message);
+      }
+    }
 
-    // If TOTP fails and user is already 2FA enabled, check backup codes (only during login flow)
+    // STEP 2: If not verified against pending secret, verify against active twoFactorSecret
+    if (!isValid && user.twoFactorSecret) {
+      try {
+        const activePlain = decryptTotpSecret(user.twoFactorSecret);
+        if (speakeasy.totp.verify({ secret: activePlain, encoding: 'base32', token: userToken, window: 1 })) {
+          isValid = true;
+          // Transparent in-place migration to encrypted secret if stored as legacy plaintext
+          if (!isEncrypted(user.twoFactorSecret)) {
+            user.twoFactorSecret = encryptTotpSecret(activePlain);
+            await user.save().catch(e => console.error('[verify2FA] Encryption migration save error:', e.message));
+          }
+        }
+      } catch (err) {
+        console.error('[verify2FA] Error decrypting active secret:', err.message);
+      }
+    }
+
+    // STEP 3: If TOTP fails and user is already 2FA enabled, check backup codes (only during login or normal verification)
     if (!isValid && user.isTwoFactorEnabled && user.twoFactorBackupCodes && user.twoFactorBackupCodes.length > 0) {
       let matchedHash = null;
       for (let i = 0; i < user.twoFactorBackupCodes.length; i++) {
@@ -597,7 +737,7 @@ export const verify2FA = async (req, res) => {
         const atomicConsume = await User.findOneAndUpdate(
           { _id: user._id, twoFactorBackupCodes: matchedHash },
           { $pull: { twoFactorBackupCodes: matchedHash } },
-          { new: true }
+          { returnDocument: 'after', select: '+twoFactorBackupCodes' }
         );
         if (atomicConsume) {
           isValid = true;
@@ -620,10 +760,58 @@ export const verify2FA = async (req, res) => {
       return res.status(401).json({ success: false, message: 'Invalid 2FA code.' });
     }
 
-    // STATE TRANSITION: If this was an initial enrollment verification
+    // STATE TRANSITION A: Activating a rotated replacement secret
+    if (isPendingRotation) {
+      user.twoFactorSecret = user.pendingTwoFactorSecret;
+      user.twoFactorBackupCodes = user.pendingTwoFactorBackupCodes;
+      user.pendingTwoFactorSecret = undefined;
+      user.pendingTwoFactorBackupCodes = undefined;
+      user.pendingTwoFactorCreatedAt = undefined;
+      user.isTwoFactorEnabled = true;
+      user.mfaSetupRequired = false;
+      await user.save();
+
+      try {
+        await createCriticalAuditLog({
+          tenantId: user.tenantId || null,
+          actor: { userId: user._id, role: user.role, email: user.email },
+          action: 'AUTH_2FA_REPLACED',
+          details: { method: 'totp_verified' }
+        });
+      } catch (auditErr) {
+        console.error('[AuthController] Audit failed for 2FA replacement:', auditErr.message);
+      }
+
+      const finalJwt = generateToken(user._id);
+      setAuthCookie(res, finalJwt);
+
+      return res.status(200).json({
+        success: true,
+        token: finalJwt,
+        isTwoFactorEnabled: true,
+        message: 'Two-factor authentication secret successfully rotated and verified.',
+        user: {
+          _id: user._id,
+          name: user.name,
+          email: user.email,
+          studentId: user.studentId,
+          role: user.role,
+          mustChangePassword: !!user.mustChangePassword,
+          tenantId: user.tenantId,
+          isTwoFactorEnabled: true,
+          mfaEnforced: !!user.mfaEnforced,
+          mfaSetupRequired: false
+        }
+      });
+    }
+
+    // STATE TRANSITION B: Initial enrollment verification
     if (!user.isTwoFactorEnabled) {
       user.isTwoFactorEnabled = true;
       user.mfaSetupRequired = false;
+      user.pendingTwoFactorSecret = undefined;
+      user.pendingTwoFactorBackupCodes = undefined;
+      user.pendingTwoFactorCreatedAt = undefined;
       await user.save();
 
       try {
@@ -649,8 +837,12 @@ export const verify2FA = async (req, res) => {
         });
       }
 
+      const finalJwt = generateToken(user._id);
+      setAuthCookie(res, finalJwt);
+
       return res.status(200).json({
         success: true,
+        token: finalJwt,
         isTwoFactorEnabled: true,
         user: {
           _id: user._id,
@@ -668,9 +860,8 @@ export const verify2FA = async (req, res) => {
       });
     }
 
-    // STATE TRANSITION: Login flow verification for existing 2FA enabled users
-    user.lastLogin = new Date();
-    await user.save();
+    // STATE TRANSITION C: Login flow verification for existing 2FA enabled users
+    await User.updateOne({ _id: user._id }, { lastLogin: new Date() });
 
     // Standard: 2FA success audit (async)
     createAuditLog({

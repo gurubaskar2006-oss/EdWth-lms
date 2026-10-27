@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import confetti from 'canvas-confetti';
 import {
   INITIAL_USER,
@@ -18,7 +18,7 @@ import {
   SCHOOL_TODAY_CLASSES,
   SCHOOL_ANNOUNCEMENTS
 } from '../data/mockData';
-import { apiService } from '../services/apiService';
+import { apiService, getAuthToken, setAuthToken } from '../services/apiService';
 import { socketService } from '../services/socketService';
 import { getInstitutionConfig } from '../config/institutionConfig';
 import { useFocusTimer } from '../hooks/useFocusTimer';
@@ -85,7 +85,7 @@ export const LMSProvider = ({ children }) => {
 
   // Current Logged-in User
   const [user, setUser] = useState(() => {
-    const token = localStorage.getItem('lumina_auth_token');
+    const token = getAuthToken();
     const savedUser = localStorage.getItem('lumina_current_user');
     if (token && savedUser && savedUser !== 'null' && savedUser !== 'undefined') {
       try {
@@ -102,7 +102,7 @@ export const LMSProvider = ({ children }) => {
   });
 
   const [isAuthenticated, setIsAuthenticated] = useState(() => {
-    const token = localStorage.getItem('lumina_auth_token');
+    const token = getAuthToken();
     const savedUser = localStorage.getItem('lumina_current_user');
     return Boolean(token && savedUser && savedUser !== 'null' && savedUser !== 'undefined');
   });
@@ -118,13 +118,13 @@ export const LMSProvider = ({ children }) => {
       }
     }
     return {
-      companyName: 'Nexus Institute of Technology',
-      portalName: 'Nexus Enterprise Student Learning Portal',
-      shortName: 'NEXUS',
-      department: 'School of Computing & Applied Intelligence',
-      motto: 'Empowering World-Class AI Engineers & Scholars',
-      term: 'Fall 2026 Academic Term',
-      portalId: 'PORTAL-NX-2026',
+      companyName: 'EdWth Academy',
+      portalName: 'EdWth Academy Learning Portal',
+      shortName: 'EDWTH',
+      department: 'Corporate & Institutional Education',
+      motto: 'EMPOWERING EVERY LEARNER',
+      term: 'Academic Year 2026-2027',
+      portalId: 'EDWTH-ACADEMY-2026',
       environment: 'Production Enterprise Cluster'
     };
   });
@@ -146,6 +146,7 @@ export const LMSProvider = ({ children }) => {
   const [mustChangePasswordPromptOpen, setMustChangePasswordPromptOpen] = useState(() => {
     return !!user?.mustChangePassword;
   });
+  const isVerifyingSessionRef = useRef(false);
 
   useEffect(() => {
     if (user?.mustChangePassword) {
@@ -666,7 +667,7 @@ $$\\text{Attention}(Q, K, V) = \\text{softmax}\\left(\\frac{QK^T}{\\sqrt{d_k}}\\
 
     if (apiResult && apiResult.success && apiResult.user) {
       if (apiResult.token) {
-        localStorage.setItem('lumina_auth_token', apiResult.token);
+        setAuthToken(apiResult.token);
       }
       const matchedClientStudent = students.find(
         (s) => (s.email.toLowerCase() === cleanId || s.studentId.toLowerCase() === cleanId)
@@ -720,7 +721,7 @@ $$\\text{Attention}(Q, K, V) = \\text{softmax}\\left(\\frac{QK^T}{\\sqrt{d_k}}\\
     const apiResult = await apiService.verify2FA(preAuthToken, token);
     if (apiResult && apiResult.success && apiResult.user) {
       if (apiResult.token) {
-        localStorage.setItem('lumina_auth_token', apiResult.token);
+        setAuthToken(apiResult.token);
       }
       const mustChange = apiResult.mustChangePassword ?? apiResult.user.mustChangePassword ?? false;
       const fullUser = { ...INITIAL_USER, ...apiResult.user, mustChangePassword: mustChange };
@@ -776,19 +777,54 @@ $$\\text{Attention}(Q, K, V) = \\text{softmax}\\left(\\frac{QK^T}{\\sqrt{d_k}}\\
     setUser(null);
     setToasts([]);
     localStorage.removeItem('lumina_current_user');
-    localStorage.removeItem('lumina_auth_token');
+    setAuthToken(null);
   };
 
   useEffect(() => {
-    const handleSessionExpired = () => {
+    const handleSessionExpired = async () => {
       // Guard: only fire session expired if the user was actively authenticated or holds a token
-      if (!isAuthenticated && !localStorage.getItem('lumina_auth_token')) return;
+      const currentToken = getAuthToken();
+      if (!isAuthenticated && !currentToken) return;
+
+      // Prevent concurrent verification checks or re-entry loops
+      if (isVerifyingSessionRef.current) return;
+      isVerifyingSessionRef.current = true;
+
+      try {
+        // Authoritative session verification: probe /auth/profile to confirm token validity
+        // This protects valid tokens from being wiped by isolated 401 errors on secondary calls
+        const profileRes = await apiService.getProfile();
+        if (profileRes && (profileRes.success || profileRes.user)) {
+          // Token is still valid on the server! Do not wipe state.
+          return;
+        }
+
+        // An ordinary 403 (Forbidden / authorization restriction / setup required) indicates the token is valid,
+        // but the user lacks permission or needs to complete enrollment.
+        // It must NOT automatically log out a valid user.
+        if (profileRes?.status === 403 || profileRes?.isForbidden) {
+          console.warn('[LMSContext] Profile probe returned 403 Forbidden; user identity remains valid, preserving session credentials.');
+          return;
+        }
+
+        // If it is a network failure or transient server error (HTTP 5xx), do NOT log out the user
+        if (profileRes?.isNetworkError || profileRes?.isServerError) {
+          console.warn('[LMSContext] Session verification encountered network or server error; preserving session credentials offline.');
+          return;
+        }
+      } catch {
+        // Network error during probe — preserve credentials offline
+        return;
+      } finally {
+        isVerifyingSessionRef.current = false;
+      }
+
       socketService.disconnect();
       setIsAuthenticated(false);
       setUser(null);
       setToasts([]);
       localStorage.removeItem('lumina_current_user');
-      localStorage.removeItem('lumina_auth_token');
+      setAuthToken(null);
       setLoginModalOpen(true);
       addToast('Session Expired', 'Your session expired — please log in again.', 'urgent');
     };

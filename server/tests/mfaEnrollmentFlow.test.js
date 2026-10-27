@@ -20,6 +20,7 @@ import app from '../server.js';
 import User from '../models/User.js';
 import College from '../models/College.js';
 import { getJwtSecret } from '../config/environment.js';
+import { decryptTotpSecret } from '../utils/mfaCrypto.js';
 
 const generateToken = (id, role = 'superadmin', tenantId = null) => {
   return jwt.sign({ id, role, tenantId }, getJwtSecret(), { expiresIn: '1h' });
@@ -125,9 +126,9 @@ describe('EdWth LMS — Privileged SuperAdmin MFA Enrollment Flow', () => {
     generatedSecret = res.body.secret;
 
     // Verify DB state: isTwoFactorEnabled must NOT be set to true simply by calling setup
-    const refreshed = await User.findById(superadminUser._id);
+    const refreshed = await User.findById(superadminUser._id).select('+twoFactorSecret +twoFactorBackupCodes');
     expect(refreshed.isTwoFactorEnabled).toBe(false);
-    expect(refreshed.twoFactorSecret).toBe(generatedSecret);
+    expect(decryptTotpSecret(refreshed.twoFactorSecret)).toBe(generatedSecret);
     expect(refreshed.twoFactorBackupCodes.length).toBe(5);
   });
 

@@ -1,5 +1,6 @@
 import React from 'react';
 import { useLMS } from '../../context/LMSContext';
+import { BrandLogo } from '../BrandLogo';
 import {
   Home,
   BookOpen,
@@ -48,55 +49,12 @@ export const SchoolSidebar = () => {
   return (
     <aside className="sidebar" style={{ width: '250px', backgroundColor: 'var(--bg-secondary)' }}>
       {/* Brand Header */}
-      <div className="sidebar-header" style={{ padding: '1.25rem 1.25rem 1rem', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-        <div
-          style={{
-            width: '42px',
-            height: '42px',
-            borderRadius: '12px',
-            backgroundColor: '#171717',
-            border: '1px solid #FFB21A33',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            boxShadow: '0 4px 12px rgba(245, 130, 18, 0.25)',
-            overflow: 'hidden',
-            flexShrink: 0
-          }}
-        >
-          <img
-            src="/logo-transparent.png"
-            alt="EdWth Academy"
-            onError={(e) => {
-              e.currentTarget.style.display = 'none';
-              if (e.currentTarget.nextSibling) e.currentTarget.nextSibling.style.display = 'block';
-            }}
-            style={{ width: '32px', height: '32px', objectFit: 'contain' }}
-          />
-          <School size={22} color="#F58212" style={{ display: 'none' }} />
-        </div>
-        <div style={{ minWidth: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-            <h2 style={{ color: 'var(--text-primary)', fontWeight: 800, fontSize: '0.96rem', margin: 0, letterSpacing: '0.02em', whiteSpace: 'nowrap' }}>
-              EdWth LMS
-            </h2>
-            <span
-              style={{
-                fontSize: '0.62rem',
-                padding: '0.1rem 0.4rem',
-                borderRadius: '4px',
-                backgroundColor: 'rgba(245, 130, 18, 0.15)',
-                color: '#F58212',
-                fontWeight: 800
-              }}
-            >
-              ACADEMY
-            </span>
-          </div>
-          <div style={{ fontSize: '0.68rem', fontWeight: 600, color: 'var(--text-secondary)', marginTop: '2px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-            {user?.tenantName || portalConfig?.companyName || 'Empowering Every Learner'}
-          </div>
-        </div>
+      <div className="sidebar-header" style={{ padding: '1.25rem 1rem 1rem' }}>
+        <BrandLogo
+          variant="header"
+          productBadge="SCHOOL"
+          subtitle={user?.tenantName || portalConfig?.companyName || 'EdWth Academy • Junior Scholars'}
+        />
       </div>
 
       {/* Navigation List */}

@@ -51,11 +51,25 @@ const userSchema = new mongoose.Schema({
     default: false
   },
   twoFactorSecret: {
-    type: String
+    type: String,
+    select: false
   },
-  twoFactorBackupCodes: [{
-    type: String
-  }],
+  twoFactorBackupCodes: {
+    type: [String],
+    select: false
+  },
+  pendingTwoFactorSecret: {
+    type: String,
+    select: false
+  },
+  pendingTwoFactorBackupCodes: {
+    type: [String],
+    select: false
+  },
+  pendingTwoFactorCreatedAt: {
+    type: Date,
+    select: false
+  },
   soft_deleted: {
     type: Boolean,
     default: false
@@ -106,6 +120,9 @@ userSchema.set('toJSON', {
     delete ret.password;
     delete ret.twoFactorSecret;
     delete ret.twoFactorBackupCodes;
+    delete ret.pendingTwoFactorSecret;
+    delete ret.pendingTwoFactorBackupCodes;
+    delete ret.pendingTwoFactorCreatedAt;
     return ret;
   }
 });
@@ -115,6 +132,9 @@ userSchema.set('toObject', {
     delete ret.password;
     delete ret.twoFactorSecret;
     delete ret.twoFactorBackupCodes;
+    delete ret.pendingTwoFactorSecret;
+    delete ret.pendingTwoFactorBackupCodes;
+    delete ret.pendingTwoFactorCreatedAt;
     return ret;
   }
 });

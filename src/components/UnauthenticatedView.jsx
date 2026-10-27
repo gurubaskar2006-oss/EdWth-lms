@@ -1,6 +1,13 @@
+/**
+ * EdWth LMS Authentication View
+ * Brand: EdWth Academy
+ * Tagline: Empowering Every Learner
+ * Asset: /logo-transparent.png
+ */
 import React, { useState } from 'react';
 import { useLMS } from '../context/LMSContext';
 import { ForcedPasswordChangeModal } from './ForcedPasswordChangeModal';
+import { BrandLogo } from './BrandLogo';
 import {
   Lock,
   Mail,
@@ -182,87 +189,13 @@ export const UnauthenticatedView = ({ portalName }) => {
     >
       {/* Brand Header */}
       <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
-        <div
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            width: '64px',
-            height: '64px',
-            borderRadius: '16px',
-            backgroundColor: '#171717',
-            border: '1.5px solid rgba(245, 130, 18, 0.45)',
-            boxShadow: '0 8px 24px -4px rgba(245, 130, 18, 0.35)',
-            marginBottom: '1rem',
-            padding: '8px',
-            overflow: 'hidden'
-          }}
-        >
-          <img
-            src="/logo-transparent.png"
-            alt="EdWth Academy"
-            style={{ width: '100%', height: '100%', objectFit: 'contain' }}
-            onError={(e) => {
-              e.currentTarget.style.display = 'none';
-              if (e.currentTarget.parentElement) {
-                e.currentTarget.parentElement.innerHTML = '<span style="font-size:1.5rem;font-weight:900;color:#F58212;">E</span>';
-              }
-            }}
-          />
-        </div>
-        <h1
-          style={{
-            fontSize: '2rem',
-            fontWeight: 800,
-            color: 'var(--text-primary)',
-            letterSpacing: '-0.025em',
-            margin: 0
-          }}
-        >
-          EdWth LMS
-        </h1>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', marginTop: '0.35rem' }}>
-          <span
-            style={{
-              fontSize: '0.74rem',
-              fontWeight: 700,
-              letterSpacing: '0.06em',
-              textTransform: 'uppercase',
-              color: '#F58212',
-              backgroundColor: 'rgba(245, 130, 18, 0.12)',
-              padding: '0.15rem 0.55rem',
-              borderRadius: '9999px',
-              border: '1px solid rgba(245, 130, 18, 0.25)'
-            }}
-          >
-            EdWth Academy
-          </span>
-          {portalName && (
-            <span
-              style={{
-                fontSize: '0.74rem',
-                fontWeight: 600,
-                color: 'var(--text-secondary)',
-                backgroundColor: 'var(--bg-surface-subtle)',
-                padding: '0.15rem 0.55rem',
-                borderRadius: '9999px',
-                border: '1px solid var(--border-default)'
-              }}
-            >
-              {portalName}
-            </span>
-          )}
-        </div>
-        <p
-          style={{
-            fontSize: '0.95rem',
-            color: 'var(--text-secondary)',
-            marginTop: '0.45rem',
-            fontWeight: 500
-          }}
-        >
-          Empowering Every Learner
-        </p>
+        <BrandLogo
+          variant="full"
+          size="lg"
+          productBadge="LMS"
+          subtitle={portalName || 'Institutional Learning Portal'}
+          showTagline={true}
+        />
       </div>
 
       {/* Main Authentication Card */}

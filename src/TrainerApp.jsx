@@ -9,6 +9,7 @@ import { TrainerAttendanceView } from './views/TrainerAttendanceView';
 import { StudentsDataSheetView } from './views/StudentsDataSheetView';
 import { SchoolTeacherStudentsView } from './views/trainer/SchoolTeacherStudentsView';
 import { AcademicCalendarView } from './views/trainer/AcademicCalendarView';
+import { BrandLogo } from './components/BrandLogo';
 import { apiService } from './services/apiService';
 import { socketService } from './services/socketService';
 import {
@@ -92,20 +93,16 @@ const GradeSubmissionModal = ({ isOpen, onClose, submission, onGraded }) => {
     setError('');
 
     try {
-      const res = await apiService._fetch(`/api/v1/trainer/assignments/${submission._id}/grade`, {
-        method: 'POST',
-        body: JSON.stringify({
-          studentId: submission.studentId,
-          score: numScore,
-          feedback: feedback.trim()
-        })
+      const data = await apiService.gradeTrainerSubmission(submission._id, {
+        studentId: submission.studentId,
+        score: numScore,
+        feedback: feedback.trim()
       });
-      const data = await res.json();
-      if (res.ok && data.success) {
+      if (data && data.success) {
         onGraded({ ...submission, score: numScore, feedback: feedback.trim(), status: 'graded' });
         onClose();
       } else {
-        setError(data.message || 'Failed to submit grade.');
+        setError(data?.message || 'Failed to submit grade.');
       }
     } catch {
       setError('Network error while submitting grade.');
@@ -124,17 +121,13 @@ const GradeSubmissionModal = ({ isOpen, onClose, submission, onGraded }) => {
     setError('');
 
     try {
-      const res = await apiService._fetch(`/api/v1/trainer/assignments/${submission._id}/grade`, {
-        method: 'POST',
-        body: JSON.stringify({
-          studentId: submission.studentId,
-          score: score !== '' ? Number(score) : null,
-          feedback: feedback.trim(),
-          status: 'needs_revision'
-        })
+      const data = await apiService.gradeTrainerSubmission(submission._id, {
+        studentId: submission.studentId,
+        score: score !== '' ? Number(score) : null,
+        feedback: feedback.trim(),
+        status: 'needs_revision'
       });
-      const data = await res.json();
-      if (res.ok && data.success) {
+      if (data && data.success) {
         onGraded({ ...submission, score: score !== '' ? Number(score) : null, feedback: feedback.trim(), status: 'needs_revision' });
         onClose();
       } else {
@@ -264,7 +257,7 @@ const TrainerDashboard = ({ onNavigateTab, onOpenGradingModal }) => {
 
   useEffect(() => {
     Promise.all([
-      apiService._fetch('/api/v1/trainer/analytics').then(r => r.ok ? r.json() : null),
+      apiService.getTrainerAnalytics(),
       apiService.getTrainerClasses(),
       apiService.getTrainerHomework(),
       apiService.getTrainerTests(),
@@ -797,11 +790,7 @@ const GradingView = ({ onSelectSubmission }) => {
   const fetchSubmissions = () => {
     setLoading(true);
     setError(null);
-    apiService._fetch('/api/v1/trainer/submissions')
-      .then(r => {
-        if (!r.ok) throw new Error(`HTTP error ${r.status}`);
-        return r.json();
-      })
+    apiService.getTrainerSubmissions()
       .then(data => {
         if (data?.submissions) {
           setSubmissions(data.submissions);
@@ -1252,33 +1241,12 @@ export const TrainerApp = () => {
     <div className="app-container">
       {/* Trainer Sidebar with Professional Indigo Accent Styling */}
       <aside className="sidebar">
-        <div className="sidebar-header" style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-          <div style={{
-            width: '40px',
-            height: '40px',
-            borderRadius: '10px',
-            backgroundColor: '#171717',
-            border: '1px solid rgba(245, 130, 18, 0.35)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            overflow: 'hidden',
-            padding: '4px',
-            boxShadow: '0 2px 8px rgba(0,0,0,0.2)'
-          }}>
-            <img src="/logo-transparent.png" alt="EdWth" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
-          </div>
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-              <h2 style={{ color: 'var(--text-primary)', fontWeight: 800, fontSize: '0.95rem', margin: 0, letterSpacing: '0.03em' }}>EDWTH LMS</h2>
-              <span style={{ fontSize: '0.62rem', padding: '0.1rem 0.35rem', borderRadius: '4px', backgroundColor: 'rgba(245, 130, 18, 0.15)', color: '#F58212', fontWeight: 700 }}>
-                {terms?.educatorLabel?.toUpperCase() || 'EDUCATOR'}
-              </span>
-            </div>
-            <div style={{ fontSize: '0.68rem', fontWeight: 600, color: 'var(--text-secondary)', marginTop: '1px' }}>
-              EdWth Academy • {terms?.portalSubtitle || 'Faculty Instruction'}
-            </div>
-          </div>
+        <div className="sidebar-header" style={{ padding: '1.25rem 1rem 1rem' }}>
+          <BrandLogo
+            variant="header"
+            productBadge={terms?.educatorLabel?.toUpperCase() || 'EDUCATOR'}
+            subtitle={`EdWth Academy • ${terms?.portalSubtitle || 'Faculty Instruction'}`}
+          />
         </div>
 
         <nav className="sidebar-nav">

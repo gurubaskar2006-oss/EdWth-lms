@@ -198,7 +198,7 @@ app.get('/api/v1/health', (req, res) => {
     timestamp: new Date().toISOString(),
     uptime: Math.floor(process.uptime()),
     environment: process.env.NODE_ENV || 'development',
-    service: 'Lumina LMS Enterprise API by 6th Civilians Corporation'
+    service: 'EdWth Academy LMS Enterprise API by 6th Civilians Corporation'
   });
 });
 
@@ -286,7 +286,7 @@ if (fs.existsSync(DIST_PATH)) {
   // When running in API-only mode (frontend hosted on Vercel), provide a clean root status
   app.get('/', (req, res) => {
     res.json({
-      service: 'Lumina LMS Enterprise API by 6th Civilians Corporation',
+      service: 'EdWth Academy LMS Enterprise API by 6th Civilians Corporation',
       status: 'online',
       health: '/api/v1/health'
     });
@@ -335,7 +335,7 @@ app.set('io', io);
 if (process.env.NODE_ENV !== 'test') {
   httpServer.listen(PORT, '0.0.0.0', () => {
     console.log(`====================================================`);
-    console.log(`🚀 Lumina LMS Enterprise Server running on port ${PORT}`);
+    console.log(`🚀 EdWth Academy LMS Enterprise Server running on port ${PORT}`);
     console.log(`🏠 Local URL: http://localhost:${PORT}`);
     console.log(`🔌 Real-Time Socket.io: Active (Horizontal Redis scaling enabled)`);
     console.log(`🛡️ Isolated Code Lab: Active (Piston Sandbox Queue)`);

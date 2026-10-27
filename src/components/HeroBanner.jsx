@@ -15,9 +15,9 @@ export const HeroBanner = () => {
   const { user, portalConfig, updatePortalConfig, setActiveTab } = useLMS();
 
   const [editPortalModalOpen, setEditPortalModalOpen] = useState(false);
-  const [tempCompanyName, setTempCompanyName] = useState(portalConfig?.companyName || 'Nexus Institute of Technology');
-  const [tempPortalName, setTempPortalName] = useState(portalConfig?.portalName || 'Lumina Enterprise Learning Platform');
-  const [tempMotto, setTempMotto] = useState(portalConfig?.motto || 'Empowering World-Class AI Engineers & Scholars');
+  const [tempCompanyName, setTempCompanyName] = useState(portalConfig?.companyName || 'EdWth Academy');
+  const [tempPortalName, setTempPortalName] = useState(portalConfig?.portalName || 'EdWth Academy LMS');
+  const [tempMotto, setTempMotto] = useState(portalConfig?.motto || 'EMPOWERING EVERY LEARNER');
 
   // Dynamic time-based greeting
   const currentHour = new Date().getHours();
@@ -234,7 +234,7 @@ export const HeroBanner = () => {
                     Customize Institution Portal
                   </h3>
                   <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
-                    Configure the institutional branding displayed across Lumina
+                    Configure the institutional branding displayed across EdWth Academy
                   </p>
                 </div>
               </div>
@@ -253,8 +253,23 @@ export const HeroBanner = () => {
                   type="button"
                   onClick={() =>
                     handlePresetSelect(
+                      'EdWth Academy',
+                      'EdWth Academy LMS',
+                      'EMPOWERING EVERY LEARNER'
+                    )
+                  }
+                  className="btn-secondary"
+                  style={{ fontSize: '0.75rem', padding: '0.35rem 0.65rem' }}
+                >
+                  🏛️ EdWth Academy
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    handlePresetSelect(
                       'Nexus Institute of Technology',
-                      'Lumina Enterprise Learning Platform',
+                      'Nexus Portal | EdWth LMS',
                       'Empowering World-Class AI Engineers & Scholars'
                     )
                   }
@@ -268,30 +283,15 @@ export const HeroBanner = () => {
                   type="button"
                   onClick={() =>
                     handlePresetSelect(
-                      'Google Cloud Learning Academy',
-                      'Lumina Enterprise Cloud LMS',
-                      'Mastering Scalable Cloud & Machine Learning Systems'
+                      'Oakridge High School',
+                      'Oakridge Portal | EdWth LMS',
+                      'Excellence in STEM & Foundational Sciences'
                     )
                   }
                   className="btn-secondary"
                   style={{ fontSize: '0.75rem', padding: '0.35rem 0.65rem' }}
                 >
-                  ☁️ Google Cloud Academy
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() =>
-                    handlePresetSelect(
-                      'Stanford Online AI Lab',
-                      'Lumina Advanced Academic Portal',
-                      'Advancing Fundamental Computer Science & Intelligence'
-                    )
-                  }
-                  className="btn-secondary"
-                  style={{ fontSize: '0.75rem', padding: '0.35rem 0.65rem' }}
-                >
-                  🌲 Stanford Online
+                  🌲 Oakridge High School
                 </button>
               </div>
             </div>
@@ -307,7 +307,7 @@ export const HeroBanner = () => {
                   required
                   value={tempCompanyName}
                   onChange={(e) => setTempCompanyName(e.target.value)}
-                  placeholder="e.g. Nexus Institute of Technology"
+                  placeholder="e.g. EdWth Academy"
                   style={{ width: '100%', fontSize: '0.88rem' }}
                 />
               </div>
@@ -321,7 +321,7 @@ export const HeroBanner = () => {
                   required
                   value={tempPortalName}
                   onChange={(e) => setTempPortalName(e.target.value)}
-                  placeholder="e.g. Lumina Enterprise Learning Platform"
+                  placeholder="e.g. EdWth Academy LMS"
                   style={{ width: '100%', fontSize: '0.88rem' }}
                 />
               </div>

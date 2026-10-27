@@ -4578,11 +4578,8 @@ export const AssessmentIntegrityView = ({ alerts = [], onClearAlerts, onNavigate
   const fetchIntegrityData = async () => {
     setLoading(true);
     try {
-      const res = await apiService._fetch('/api/v1/assessments/active-monitoring');
-      if (res && res.ok) {
-        const data = await res.json();
-        if (data?.activeSessions) setActiveSessions(data.activeSessions);
-      }
+      const data = await apiService.getActiveAssessmentMonitoring();
+      if (data?.activeSessions) setActiveSessions(data.activeSessions);
     } catch (err) {
       console.warn('Active monitoring fetch fallback:', err);
     } finally {

@@ -135,6 +135,9 @@ export const updateStudent = async (req, res) => {
     'mustChangePassword',
     'twoFactorSecret',
     'twoFactorBackupCodes',
+    'pendingTwoFactorSecret',
+    'pendingTwoFactorBackupCodes',
+    'pendingTwoFactorCreatedAt',
     'soft_deleted',
     'createdAt',
     'updatedAt'

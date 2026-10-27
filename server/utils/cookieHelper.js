@@ -23,16 +23,20 @@ export const getAuthCookieOptions = () => {
 };
 
 export const setAuthCookie = (res, token) => {
-  res.cookie('jwt', token, getAuthCookieOptions());
+  if (typeof res?.cookie === 'function') {
+    res.cookie('jwt', token, getAuthCookieOptions());
+  }
 };
 
 export const clearAuthCookie = (res) => {
-  const options = getAuthCookieOptions();
-  delete options.maxAge;
-  res.cookie('jwt', '', {
-    ...options,
-    expires: new Date(0)
-  });
+  if (typeof res?.cookie === 'function') {
+    const options = getAuthCookieOptions();
+    delete options.maxAge;
+    res.cookie('jwt', '', {
+      ...options,
+      expires: new Date(0)
+    });
+  }
 };
 
 export default {

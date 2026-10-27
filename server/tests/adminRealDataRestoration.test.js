@@ -763,7 +763,7 @@ describe('Lumina LMS — Admin Real-Data Restoration & RBAC', () => {
       expect(backupVerifyRes.body.token).toBeDefined();
 
       // Check remaining backup codes in database (must be 4 now)
-      const userAfterBackupUse = await User.findById(privilegedUser._id);
+      const userAfterBackupUse = await User.findById(privilegedUser._id).select('+twoFactorBackupCodes');
       expect(userAfterBackupUse.twoFactorBackupCodes.length).toBe(4);
 
       // Attempting to re-use the SAME backup code on next login must fail
@@ -1021,7 +1021,7 @@ describe('Lumina LMS — Admin Real-Data Restoration & RBAC', () => {
       expect(statuses).toContain(401);
 
       // In the database, the backup code must have been removed exactly once, leaving 1 code
-      const updatedRaceUser = await User.findById(raceUser._id);
+      const updatedRaceUser = await User.findById(raceUser._id).select('+twoFactorBackupCodes');
       expect(updatedRaceUser.twoFactorBackupCodes.length).toBe(1);
       expect(updatedRaceUser.twoFactorBackupCodes[0]).toBe(dummyHash);
     });
