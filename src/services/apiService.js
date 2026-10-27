@@ -3,11 +3,20 @@ const API_BASE_URL = `${BACKEND_URL}/api/v1`;
 
 let sessionExpiredDebounce = 0;
 
+let activeSessionToken = null;
+
+export const setActiveSessionToken = (token) => {
+  activeSessionToken = token || null;
+};
+
+export const getActiveSessionToken = () => activeSessionToken;
+
 /**
- * Universal token resolver: checks lumina_auth_token, token, jwt, and sessionStorage.
+ * Universal token resolver: checks in-memory activeSessionToken, lumina_auth_token, token, jwt, and sessionStorage.
  */
 export const getAuthToken = () => {
   try {
+    if (activeSessionToken) return activeSessionToken;
     if (typeof window === 'undefined') return null;
     return (
       localStorage.getItem('lumina_auth_token') ||
@@ -18,12 +27,13 @@ export const getAuthToken = () => {
       null
     );
   } catch {
-    return null;
+    return activeSessionToken || null;
   }
 };
 
 export const setAuthToken = (token) => {
   try {
+    setActiveSessionToken(token);
     if (typeof window === 'undefined') return;
     if (token) {
       localStorage.setItem('lumina_auth_token', token);
@@ -68,7 +78,7 @@ export const apiService = {
       }
     });
 
-    if (res.status === 401 && !targetUrl.includes('/auth/login') && !targetUrl.includes('/auth/profile') && !targetUrl.includes('/students/datasheet')) {
+    if (res.status === 401 && !targetUrl.includes('/auth/login') && !targetUrl.includes('/auth/profile') && !targetUrl.includes('/students/datasheet') && !targetUrl.includes('/auth/change-password')) {
       const isUserCached = !!localStorage.getItem('lumina_current_user');
       const hasToken = !!getAuthToken();
       const now = Date.now();
@@ -267,13 +277,23 @@ export const apiService = {
     }
   },
 
-  async changePassword(newPassword, confirmPassword, currentPassword = '') {
+  async changePassword(newPassword, confirmPassword, currentPassword = '', tokenOverride = null) {
     try {
+      const token = tokenOverride || getAuthToken();
+      if (tokenOverride) {
+        setAuthToken(tokenOverride);
+      }
+      const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
       const res = await this._fetch(`${API_BASE_URL}/auth/change-password`, {
         method: 'POST',
+        headers,
         body: JSON.stringify({ newPassword, confirmPassword, currentPassword }),
       });
-      return await res.json();
+      const data = await res.json();
+      if (data && data.success && data.token) {
+        setAuthToken(data.token);
+      }
+      return data;
     } catch (e) {
       console.error('Change password error:', e);
       return { success: false, message: 'Network error during password change.' };

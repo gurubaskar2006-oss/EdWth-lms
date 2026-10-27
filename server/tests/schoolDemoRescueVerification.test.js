@@ -307,4 +307,142 @@ describe('EdWth LMS — School Visit Demo Rescue Verification', () => {
       expect(unauthViewCode).toContain('import.meta.env.DEV');
     });
   });
+
+  describe('5. Forced Password Change & Session Continuity Flow', () => {
+    let studentRecord;
+    let tempPass;
+    let tempAuthToken;
+    let rotatedAuthToken;
+
+    beforeAll(async () => {
+      // Create student in school tenant
+      studentRecord = await User.create({
+        studentId: `SCH-FPC-${ts}`,
+        name: 'Forced Change Student',
+        email: `fpc.student.${ts}@oakridge.test`,
+        password: await bcrypt.hash('Initial#123!', 10),
+        role: 'student',
+        tenantId: schoolTenant._id,
+        tenantName: schoolTenant.name,
+        accountStatus: 'Active'
+      });
+    });
+
+    it('generates a temporary password when admin resets student password', async () => {
+      const resetRes = await request(app)
+        .post(`/api/v1/students/${studentRecord.studentId}/reset-password`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send();
+
+      expect(resetRes.status).toBe(200);
+      expect(resetRes.body.success).toBe(true);
+      expect(resetRes.body.temporaryPassword).toBeTruthy();
+      tempPass = resetRes.body.temporaryPassword;
+
+      const updated = await User.findById(studentRecord._id);
+      expect(updated.mustChangePassword).toBe(true);
+    });
+
+    it('student logs in with temporary password and receives mustChangePassword: true with temporary JWT', async () => {
+      const loginRes = await request(app)
+        .post('/api/v1/auth/login')
+        .send({
+          identifier: studentRecord.studentId,
+          password: tempPass
+        });
+
+      expect(loginRes.status).toBe(200);
+      expect(loginRes.body.success).toBe(true);
+      expect(loginRes.body.mustChangePassword).toBe(true);
+      expect(loginRes.body.token).toBeTruthy();
+      expect(loginRes.body.user.mustChangePassword).toBe(true);
+      expect(loginRes.body.user.institutionType).toBe('school');
+
+      tempAuthToken = loginRes.body.token;
+    });
+
+    it('forbids access (403 MUST_CHANGE_PASSWORD) to academic endpoints while mustChangePassword is true', async () => {
+      const accessRes = await request(app)
+        .get('/api/v1/school/subjects')
+        .set('Authorization', `Bearer ${tempAuthToken}`);
+
+      expect(accessRes.status).toBe(403);
+      expect(accessRes.body.success).toBe(false);
+      expect(accessRes.body.code).toBe('MUST_CHANGE_PASSWORD');
+    });
+
+    it('rejects POST /api/v1/auth/change-password with 401 when no token is supplied', async () => {
+      const unauthRes = await request(app)
+        .post('/api/v1/auth/change-password')
+        .send({
+          newPassword: 'Permanent#2026!Pass',
+          confirmPassword: 'Permanent#2026!Pass'
+        });
+
+      expect(unauthRes.status).toBe(401);
+      expect(unauthRes.body.success).toBe(false);
+      expect(unauthRes.body.message).toMatch(/Not authorized, no token/i);
+    });
+
+    it('successfully changes password with temp token, rotates JWT token, and clears mustChangePassword flag', async () => {
+      const changeRes = await request(app)
+        .post('/api/v1/auth/change-password')
+        .set('Authorization', `Bearer ${tempAuthToken}`)
+        .send({
+          newPassword: 'Permanent#2026!Pass',
+          confirmPassword: 'Permanent#2026!Pass'
+        });
+
+      expect(changeRes.status).toBe(200);
+      expect(changeRes.body.success).toBe(true);
+      expect(changeRes.body.token).toBeTruthy();
+      expect(changeRes.body.user).toBeTruthy();
+      expect(changeRes.body.user.mustChangePassword).toBe(false);
+      expect(changeRes.body.user.institutionType).toBe('school');
+
+      rotatedAuthToken = changeRes.body.token;
+
+      // Verify in DB
+      const dbUser = await User.findById(studentRecord._id);
+      expect(dbUser.mustChangePassword).toBe(false);
+      const isMatch = await bcrypt.compare('Permanent#2026!Pass', dbUser.password);
+      expect(isMatch).toBe(true);
+    });
+
+    it('allows access to protected academic endpoints using the rotated session token', async () => {
+      const schoolRes = await request(app)
+        .get('/api/v1/school/subjects')
+        .set('Authorization', `Bearer ${rotatedAuthToken}`);
+
+      expect(schoolRes.status).toBe(200);
+      expect(schoolRes.body.success).toBe(true);
+      expect(Array.isArray(schoolRes.body.subjects)).toBe(true);
+    });
+
+    it('student can log in again using permanent password without prompt', async () => {
+      const loginRes = await request(app)
+        .post('/api/v1/auth/login')
+        .send({
+          identifier: studentRecord.studentId,
+          password: 'Permanent#2026!Pass'
+        });
+
+      expect(loginRes.status).toBe(200);
+      expect(loginRes.body.success).toBe(true);
+      expect(loginRes.body.mustChangePassword).toBe(false);
+      expect(loginRes.body.user.mustChangePassword).toBe(false);
+    });
+
+    it('old temporary password is no longer valid', async () => {
+      const oldLoginRes = await request(app)
+        .post('/api/v1/auth/login')
+        .send({
+          identifier: studentRecord.studentId,
+          password: tempPass
+        });
+
+      expect(oldLoginRes.status).toBe(401);
+      expect(oldLoginRes.body.success).toBe(false);
+    });
+  });
 });

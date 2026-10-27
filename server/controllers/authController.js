@@ -254,9 +254,41 @@ export const changePassword = async (req, res) => {
       });
     }
 
+    // Rotate session token and synchronize auth cookie
+    const token = generateToken(user._id);
+    setAuthCookie(res, token);
+
+    let institutionType = 'college';
+    let tenantName = 'Lumina Portal';
+    if (user.tenantId && mongoose.connection.readyState === 1) {
+      try {
+        const tenant = await College.findById(user.tenantId).select('name code institutionType').lean();
+        if (tenant) {
+          institutionType = tenant.institutionType || 'college';
+          tenantName = tenant.name || tenantName;
+        }
+      } catch (tErr) {
+        console.warn('[AuthController] Failed to lookup tenant in changePassword:', tErr.message);
+      }
+    }
+
     return res.status(200).json({
       success: true,
-      message: 'Password updated successfully.'
+      message: 'Password updated successfully.',
+      token,
+      user: {
+        _id: user._id,
+        name: user.name,
+        email: user.email,
+        studentId: user.studentId,
+        role: user.role,
+        batchId: user.batchId || null,
+        mustChangePassword: false,
+        tenantId: user.tenantId,
+        institutionType,
+        tenantName,
+        isTwoFactorEnabled: !!user.isTwoFactorEnabled
+      }
     });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });

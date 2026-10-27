@@ -147,6 +147,7 @@ export const LMSProvider = ({ children }) => {
     return !!user?.mustChangePassword;
   });
   const isVerifyingSessionRef = useRef(false);
+  const tempAuthTokenRef = useRef(null);
 
   useEffect(() => {
     if (user?.mustChangePassword) {
@@ -157,7 +158,7 @@ export const LMSProvider = ({ children }) => {
   // Hydrate data from backend server if available
   useEffect(() => {
     const fetchBackendData = async () => {
-      if (!isAuthenticated) return;
+      if (!isAuthenticated || user?.mustChangePassword) return;
 
       if (['admin', 'superadmin', 'trainer', 'teacher'].includes(user?.role?.toLowerCase())) {
         const res = await apiService.getStudentsDataSheet();
@@ -193,7 +194,7 @@ export const LMSProvider = ({ children }) => {
       }
     };
     fetchBackendData();
-  }, [isAuthenticated, user?.role]);
+  }, [isAuthenticated, user?.role, user?.mustChangePassword]);
 
   // Sync students to localStorage
   useEffect(() => {
@@ -211,7 +212,7 @@ export const LMSProvider = ({ children }) => {
 
   // Connect and sync with Socket.io real-time hub
   useEffect(() => {
-    if (user) {
+    if (user && !user.mustChangePassword) {
       socketService.connect(user);
 
       const unsubPresence = socketService.onPresenceUpdate((stats) => {
@@ -332,7 +333,7 @@ export const LMSProvider = ({ children }) => {
 
   // Real School Academic Data Synchronization
   const fetchSchoolData = async () => {
-    if (!isAuthenticated) return;
+    if (!isAuthenticated || user?.mustChangePassword) return;
     try {
       const [subsRes, hwRes, resRes, testsRes, attRes, calRes, annRes] = await Promise.all([
         apiService.getSchoolSubjects(),
@@ -371,7 +372,7 @@ export const LMSProvider = ({ children }) => {
 
   // Real Admin & Trainer Data Synchronization (Replaces static mock datasets with real DB entities)
   const fetchAdminAndTrainerData = async () => {
-    if (!isAuthenticated || !user) return;
+    if (!isAuthenticated || !user || user?.mustChangePassword) return;
     const role = (user.role || '').toLowerCase();
     try {
       if (role === 'admin' || role === 'superadmin') {
@@ -407,11 +408,11 @@ export const LMSProvider = ({ children }) => {
   };
 
   useEffect(() => {
-    if (isAuthenticated) {
+    if (isAuthenticated && !user?.mustChangePassword) {
       fetchSchoolData();
       fetchAdminAndTrainerData();
     }
-  }, [isAuthenticated, user?.studentId, user?.role, user?.tenantId]);
+  }, [isAuthenticated, user?.studentId, user?.role, user?.tenantId, user?.mustChangePassword]);
 
   const submitSchoolHomework = async (homeworkId, textOrCode) => {
     try {
@@ -529,14 +530,14 @@ $$\\text{Attention}(Q, K, V) = \\text{softmax}\\left(\\frac{QK^T}{\\sqrt{d_k}}\\
   // Fetch from backend
   useEffect(() => {
     const fetchNotes = async () => {
-      if (!isAuthenticated) return;
+      if (!isAuthenticated || user?.mustChangePassword) return;
       const serverNotes = await apiService.getNotes();
       if (serverNotes && Array.isArray(serverNotes)) {
         setStudyNotes(serverNotes);
       }
     };
     fetchNotes();
-  }, [isAuthenticated]);
+  }, [isAuthenticated, user?.mustChangePassword]);
 
   const addStudyNote = async (newNote) => {
     const note = {
@@ -667,6 +668,7 @@ $$\\text{Attention}(Q, K, V) = \\text{softmax}\\left(\\frac{QK^T}{\\sqrt{d_k}}\\
 
     if (apiResult && apiResult.success && apiResult.user) {
       if (apiResult.token) {
+        tempAuthTokenRef.current = apiResult.token;
         setAuthToken(apiResult.token);
       }
       const matchedClientStudent = students.find(
@@ -680,6 +682,10 @@ $$\\text{Attention}(Q, K, V) = \\text{softmax}\\left(\\frac{QK^T}{\\sqrt{d_k}}\\
         mustChangePassword: mustChange 
       };
       
+      try {
+        localStorage.setItem('lumina_current_user', JSON.stringify(fullUser));
+      } catch (e) {}
+
       setUser(fullUser);
       setIsAuthenticated(true);
       setLoginModalOpen(false);
@@ -721,10 +727,14 @@ $$\\text{Attention}(Q, K, V) = \\text{softmax}\\left(\\frac{QK^T}{\\sqrt{d_k}}\\
     const apiResult = await apiService.verify2FA(preAuthToken, token);
     if (apiResult && apiResult.success && apiResult.user) {
       if (apiResult.token) {
+        tempAuthTokenRef.current = apiResult.token;
         setAuthToken(apiResult.token);
       }
       const mustChange = apiResult.mustChangePassword ?? apiResult.user.mustChangePassword ?? false;
       const fullUser = { ...INITIAL_USER, ...apiResult.user, mustChangePassword: mustChange };
+      try {
+        localStorage.setItem('lumina_current_user', JSON.stringify(fullUser));
+      } catch (e) {}
       setUser(fullUser);
       setIsAuthenticated(true);
       setLoginModalOpen(false);
@@ -757,9 +767,24 @@ $$\\text{Attention}(Q, K, V) = \\text{softmax}\\left(\\frac{QK^T}{\\sqrt{d_k}}\\
   };
 
   const handleForcedPasswordChange = async (newPassword, confirmPassword) => {
-    const res = await apiService.changePassword(newPassword, confirmPassword);
+    const activeToken = tempAuthTokenRef.current || getAuthToken();
+    const res = await apiService.changePassword(newPassword, confirmPassword, '', activeToken);
     if (res && res.success) {
-      setUser((prev) => ({ ...prev, mustChangePassword: false }));
+      if (res.token) {
+        tempAuthTokenRef.current = res.token;
+        setAuthToken(res.token);
+      }
+      setUser((prev) => {
+        const updated = {
+          ...prev,
+          ...(res.user || {}),
+          mustChangePassword: false
+        };
+        try {
+          localStorage.setItem('lumina_current_user', JSON.stringify(updated));
+        } catch (e) {}
+        return updated;
+      });
       setMustChangePasswordPromptOpen(false);
       triggerConfetti();
       addToast('Password Updated Successfully', 'Your new permanent password is now active.', 'emerald');
@@ -773,6 +798,7 @@ $$\\text{Attention}(Q, K, V) = \\text{softmax}\\left(\\frac{QK^T}{\\sqrt{d_k}}\\
       await apiService.logout();
     } catch (e) {}
     socketService.disconnect();
+    tempAuthTokenRef.current = null;
     setIsAuthenticated(false);
     setUser(null);
     setToasts([]);
