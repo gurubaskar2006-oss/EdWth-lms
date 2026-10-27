@@ -211,10 +211,21 @@ router.post('/assignments/:id/grade', async (req, res) => {
 router.post('/students/:studentId/reset-password', async (req, res) => {
   const { studentId } = req.params;
   try {
+    if (!studentId || typeof studentId !== 'string' || !studentId.trim()) {
+      return res.status(400).json({ success: false, message: 'Valid student identifier is required.' });
+    }
+    const cleanId = studentId.trim();
+
+    // Support lookup by either MongoDB _id or school studentId without Mongoose CastError
+    const idFilter = mongoose.Types.ObjectId.isValid(cleanId)
+      ? { $or: [{ _id: cleanId }, { studentId: cleanId }] }
+      : { studentId: cleanId };
+
     const student = await User.findOne({
-      _id: studentId,
+      ...idFilter,
       tenantId: req.tenantId,
-      role: 'student'
+      role: 'student',
+      soft_deleted: { $ne: true }
     });
 
     if (!student) {
@@ -257,6 +268,9 @@ router.post('/students/:studentId/reset-password', async (req, res) => {
       temporaryPassword
     });
   } catch (err) {
+    if (err.name === 'CastError') {
+      return res.status(400).json({ success: false, message: `Invalid student identifier format: ${err.value}` });
+    }
     res.status(500).json({ success: false, message: err.message });
   }
 });

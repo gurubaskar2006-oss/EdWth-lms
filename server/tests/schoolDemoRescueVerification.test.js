@@ -114,7 +114,7 @@ describe('EdWth LMS — School Visit Demo Rescue Verification', () => {
   });
 
   describe('2. Student Password Reset Workflow', () => {
-    it('should generate a secure temporary password and allow student login with forced change', async () => {
+    it('should generate a secure temporary password by MongoDB _id and allow student login with forced change', async () => {
       const studentEmail = `student.reset.${ts}@oakridge.test`;
       const originalPass = await bcrypt.hash('OldSecret#123!', 10);
 
@@ -129,7 +129,7 @@ describe('EdWth LMS — School Visit Demo Rescue Verification', () => {
         accountStatus: 'Active'
       });
 
-      // Admin triggers reset
+      // Admin triggers reset by MongoDB _id
       const resetRes = await request(app)
         .post(`/api/v1/students/${targetStudent._id}/reset-password`)
         .set('Authorization', `Bearer ${adminToken}`)
@@ -154,6 +154,137 @@ describe('EdWth LMS — School Visit Demo Rescue Verification', () => {
       expect(loginRes.body.mustChangePassword).toBe(true);
       expect(loginRes.body.user.mustChangePassword).toBe(true);
       expect(loginRes.body.user.institutionType).toBe('school');
+    });
+
+    it('should reset password when requested with school studentId (e.g. SCH-2026-004) without Mongoose CastError', async () => {
+      const schoolStudentId = `SCH-2026-${ts}`;
+      const studentEmail = `student.schoolid.${ts}@oakridge.test`;
+      const originalPass = await bcrypt.hash('InitialPass#123!', 10);
+
+      const schoolStudent = await User.create({
+        studentId: schoolStudentId,
+        name: 'Aisha SchoolId Test',
+        email: studentEmail,
+        password: originalPass,
+        role: 'student',
+        tenantId: schoolTenant._id,
+        tenantName: schoolTenant.name,
+        accountStatus: 'Active'
+      });
+
+      // Reset using the school student ID string instead of MongoDB _id
+      const resetRes = await request(app)
+        .post(`/api/v1/students/${schoolStudentId}/reset-password`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send();
+
+      expect(resetRes.status).toBe(200);
+      expect(resetRes.body.success).toBe(true);
+      expect(resetRes.body.temporaryPassword).toBeTruthy();
+      expect(typeof resetRes.body.temporaryPassword).toBe('string');
+      expect(resetRes.body.temporaryPassword.length).toBe(12);
+
+      // Verify password was updated to a bcrypt hash in DB
+      const updatedUser = await User.findById(schoolStudent._id);
+      expect(updatedUser.password).not.toBe(originalPass);
+      expect(updatedUser.password).toMatch(/^\$2[aby]\$\d+\$/);
+      expect(updatedUser.mustChangePassword).toBe(true);
+
+      // Verify login with temporary password
+      const loginRes = await request(app)
+        .post('/api/v1/auth/login')
+        .send({
+          identifier: studentEmail,
+          password: resetRes.body.temporaryPassword
+        });
+      expect(loginRes.status).toBe(200);
+      expect(loginRes.body.success).toBe(true);
+    });
+
+    it('should reset password via admin route (/api/v1/admin/students/:studentId/reset-password) by studentId', async () => {
+      const studentId = `SCH-ADM-${ts}`;
+      const studentEmail = `student.adminroute.${ts}@oakridge.test`;
+
+      await User.create({
+        studentId,
+        name: 'Admin Route Test Student',
+        email: studentEmail,
+        password: await bcrypt.hash('Pass#123!', 10),
+        role: 'student',
+        tenantId: schoolTenant._id,
+        tenantName: schoolTenant.name,
+        accountStatus: 'Active'
+      });
+
+      const resetRes = await request(app)
+        .post(`/api/v1/admin/students/${studentId}/reset-password`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send();
+
+      expect(resetRes.status).toBe(200);
+      expect(resetRes.body.success).toBe(true);
+      expect(resetRes.body.temporaryPassword).toBeTruthy();
+    });
+
+    it('returns controlled 404 (not 500 or CastError) when student identifier does not exist', async () => {
+      const res = await request(app)
+        .post('/api/v1/students/SCH-NONEXISTENT-9999/reset-password')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send();
+
+      expect(res.status).toBe(404);
+      expect(res.body.success).toBe(false);
+      expect(res.body.message).toMatch(/Student not found/i);
+    });
+
+    it('strictly enforces tenant isolation: cross-institution admin cannot reset password', async () => {
+      // Create a foreign tenant and admin
+      const foreignTenant = await College.create({
+        name: `Foreign Academy ${ts}`,
+        code: `FOR_${ts}`,
+        slug: `foreign-${ts}`,
+        institutionType: 'school',
+        status: 'active'
+      });
+
+      const foreignAdmin = await User.create({
+        studentId: `FOR-ADM-${ts}`,
+        name: 'Foreign Admin',
+        email: `foreign.admin.${ts}@test.org`,
+        password: await bcrypt.hash('Foreign#123!', 10),
+        role: 'admin',
+        tenantId: foreignTenant._id,
+        tenantName: foreignTenant.name,
+        accountStatus: 'Active'
+      });
+
+      const jwtSecret = process.env.JWT_SECRET || 'a_very_strong_production_test_secret_with_more_than_32_characters';
+      const foreignToken = jwt.sign({ id: foreignAdmin._id }, jwtSecret, { expiresIn: '1h' });
+
+      // Create a student in schoolTenant
+      const localStudent = await User.create({
+        studentId: `SCH-ISOL-${ts}`,
+        name: 'Isolated Student',
+        email: `isolated.${ts}@oakridge.test`,
+        password: await bcrypt.hash('Secret#123!', 10),
+        role: 'student',
+        tenantId: schoolTenant._id,
+        tenantName: schoolTenant.name,
+        accountStatus: 'Active'
+      });
+
+      // Foreign admin attempts to reset local student's password
+      const resetRes = await request(app)
+        .post(`/api/v1/students/${localStudent.studentId}/reset-password`)
+        .set('Authorization', `Bearer ${foreignToken}`)
+        .send();
+
+      expect(resetRes.status).toBe(404);
+      expect(resetRes.body.success).toBe(false);
+
+      // Clean up foreign tenant
+      await User.deleteMany({ tenantId: foreignTenant._id });
+      await College.deleteOne({ _id: foreignTenant._id });
     });
   });
 

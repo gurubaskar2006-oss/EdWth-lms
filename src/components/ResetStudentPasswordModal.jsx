@@ -20,7 +20,8 @@ export const ResetStudentPasswordModal = ({
     setLoading(true);
     setError('');
     try {
-      const res = await onConfirmReset(student.id || student._id);
+      const targetIdentifier = student._id || student.id || student.studentId;
+      const res = await onConfirmReset(targetIdentifier);
       if (res && res.success && res.temporaryPassword) {
         setTemporaryPassword(res.temporaryPassword);
         setStage('display');

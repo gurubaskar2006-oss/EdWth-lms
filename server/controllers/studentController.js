@@ -365,9 +365,31 @@ export const resetPassword = async (req, res) => {
   const { id } = req.params;
   
   try {
-    const query = mongoose.Types.ObjectId.isValid(id)
-      ? { _id: id, tenantId: req.tenantId, role: 'student' }
-      : { studentId: id, tenantId: req.tenantId, role: 'student' };
+    if (!id || typeof id !== 'string' || !id.trim()) {
+      return res.status(400).json({ success: false, message: 'Valid student identifier is required.' });
+    }
+    const cleanId = id.trim();
+    const isSuperAdmin = req.user?.role === 'superadmin';
+
+    // Support lookup by either MongoDB _id or school studentId without Mongoose CastError
+    const idFilter = mongoose.Types.ObjectId.isValid(cleanId)
+      ? { $or: [{ _id: cleanId }, { studentId: cleanId }] }
+      : { studentId: cleanId };
+
+    const query = {
+      ...idFilter,
+      role: 'student',
+      soft_deleted: { $ne: true }
+    };
+
+    // Tenant isolation: non-superadmin callers are strictly bounded by tenantId
+    if (!isSuperAdmin) {
+      if (!req.tenantId) {
+        return res.status(403).json({ success: false, message: 'Tenant identifier required for institution admin.' });
+      }
+      query.tenantId = req.tenantId;
+    }
+
     const student = await User.findOne(query);
 
     if (!student) {
@@ -395,7 +417,7 @@ export const resetPassword = async (req, res) => {
     // Critical audit log — NEVER log the temporary password
     try {
       await createCriticalAuditLog({
-        tenantId: req.tenantId,
+        tenantId: req.tenantId || student.tenantId,
         actor: actorFromRequest(req),
         action: 'STUDENT_PASSWORD_RESET',
         targetRecord: student._id,
@@ -415,6 +437,9 @@ export const resetPassword = async (req, res) => {
       temporaryPassword
     });
   } catch (error) {
+    if (error.name === 'CastError') {
+      return res.status(400).json({ success: false, message: `Invalid student identifier format: ${error.value}` });
+    }
     res.status(500).json({ success: false, message: error.message });
   }
 };

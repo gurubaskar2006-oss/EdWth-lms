@@ -250,11 +250,32 @@ router.post('/trainers', async (req, res) => {
 router.post('/students/:studentId/reset-password', async (req, res) => {
   const { studentId } = req.params;
   try {
-    const student = await User.findOne({
-      _id: studentId,
-      tenantId: req.tenantId,
-      role: 'student'
-    });
+    if (!studentId || typeof studentId !== 'string' || !studentId.trim()) {
+      return res.status(400).json({ success: false, message: 'Valid student identifier is required.' });
+    }
+    const cleanId = studentId.trim();
+    const isSuperAdmin = req.user?.role === 'superadmin';
+
+    // Support lookup by either MongoDB _id or school studentId without Mongoose CastError
+    const idFilter = mongoose.Types.ObjectId.isValid(cleanId)
+      ? { $or: [{ _id: cleanId }, { studentId: cleanId }] }
+      : { studentId: cleanId };
+
+    const query = {
+      ...idFilter,
+      role: 'student',
+      soft_deleted: { $ne: true }
+    };
+
+    // Tenant isolation: non-superadmin callers are strictly bounded by tenantId
+    if (!isSuperAdmin) {
+      if (!req.tenantId) {
+        return res.status(403).json({ success: false, message: 'Tenant identifier required for institution admin.' });
+      }
+      query.tenantId = req.tenantId;
+    }
+
+    const student = await User.findOne(query);
 
     if (!student) {
       return res.status(404).json({ success: false, message: 'Student not found in this institution.' });
@@ -272,7 +293,7 @@ router.post('/students/:studentId/reset-password', async (req, res) => {
 
     try {
       await createCriticalAuditLog({
-        tenantId: req.tenantId,
+        tenantId: req.tenantId || student.tenantId,
         actor: actorFromRequest(req),
         action: 'STUDENT_PASSWORD_RESET',
         targetRecord: student._id,
@@ -297,6 +318,9 @@ router.post('/students/:studentId/reset-password', async (req, res) => {
       temporaryPassword
     });
   } catch (err) {
+    if (err.name === 'CastError') {
+      return res.status(400).json({ success: false, message: `Invalid student identifier format: ${err.value}` });
+    }
     res.status(500).json({ success: false, message: err.message });
   }
 });
