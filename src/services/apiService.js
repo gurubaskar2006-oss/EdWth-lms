@@ -1080,6 +1080,16 @@ export const apiService = {
     }
   },
 
+  async getStorageDownloadUrl(s3Key) {
+    try {
+      const res = await this._fetch(`${API_BASE_URL}/storage/download?key=${encodeURIComponent(s3Key)}`);
+      return await res.json();
+    } catch (e) {
+      console.error('getStorageDownloadUrl error:', e);
+      return { success: false, message: 'Network error retrieving download link' };
+    }
+  },
+
   // ─── Storage Endpoints (Phase 5) ─────────────────────────────────────────
   async getStorageStatus() {
     try {

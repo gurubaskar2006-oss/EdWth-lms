@@ -469,11 +469,35 @@ export const SettingsView = ({ onCancel }) => {
             </div>
 
             <div style={{ display: 'flex', alignItems: 'center', gap: '1.25rem', marginBottom: '1.5rem', flexWrap: 'wrap' }}>
-              <img
-                src={user?.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80'}
-                alt={user?.name || 'Account'}
-                style={{ width: '64px', height: '64px', borderRadius: '50%', objectFit: 'cover', border: '2px solid var(--border-default)' }}
-              />
+              {user?.avatar ? (
+                <img
+                  src={user.avatar}
+                  alt={user?.name || 'Account'}
+                  onError={(e) => {
+                    e.currentTarget.style.display = 'none';
+                    if (e.currentTarget.nextSibling) e.currentTarget.nextSibling.style.display = 'flex';
+                  }}
+                  style={{ width: '64px', height: '64px', borderRadius: '50%', objectFit: 'cover', border: '2px solid var(--border-default)' }}
+                />
+              ) : null}
+              <div
+                style={{
+                  display: user?.avatar ? 'none' : 'flex',
+                  width: '64px',
+                  height: '64px',
+                  borderRadius: '50%',
+                  backgroundColor: 'rgba(37, 99, 235, 0.15)',
+                  color: '#2563EB',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontWeight: 800,
+                  fontSize: '1.4rem',
+                  border: '2px solid var(--border-default)',
+                  flexShrink: 0
+                }}
+              >
+                {(user?.name || 'A').slice(0, 2).toUpperCase()}
+              </div>
               <div>
                 <div style={{ fontSize: '1.1rem', fontWeight: 800, color: 'var(--text-primary)' }}>
                   {user?.name || 'Account'}

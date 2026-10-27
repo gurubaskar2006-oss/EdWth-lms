@@ -116,6 +116,10 @@ export const provisionDevTestAccounts = async () => {
         role: acc.role,
         tenantId: acc.tenantId,
         tenantName: acc.tenantName,
+        className: acc.role === 'student' ? 'Class 10 - Section A' : undefined,
+        schoolName: acc.role === 'student' ? acc.tenantName : undefined,
+        major: acc.role === 'student' ? 'Class 10 - Section A' : undefined,
+        year: acc.role === 'student' ? '10th Standard' : undefined,
         accountStatus: 'Active',
         isTwoFactorEnabled: acc.isTwoFactorEnabled || false,
         batchId: null // Zero cohorts/classes

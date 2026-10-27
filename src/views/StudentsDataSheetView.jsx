@@ -738,6 +738,29 @@ export const StudentsDataSheetView = () => {
         </div>
       </div>
 
+      {/* Credential Security & Password Reset Guidance Banner */}
+      <div
+        style={{
+          padding: '0.85rem 1.25rem',
+          borderRadius: '12px',
+          backgroundColor: 'rgba(5, 150, 105, 0.06)',
+          border: '1px solid rgba(5, 150, 105, 0.25)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          flexWrap: 'wrap',
+          gap: '0.75rem',
+          fontSize: '0.8rem'
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+          <ShieldCheck size={18} color="#059669" />
+          <span style={{ color: 'var(--text-secondary)' }}>
+            <strong style={{ color: 'var(--text-primary)' }}>Cryptographic Credential Security:</strong> Student passwords in the database are protected with one-way bcrypt hashes and cannot be viewed in plaintext. To issue login access to a student, click <strong style={{ color: '#D97706' }}>Reset</strong> to generate a secure temporary password.
+          </span>
+        </div>
+      </div>
+
       {/* Main Students Data Sheet Table */}
       <div
         className="card table-responsive-wrapper"
@@ -806,17 +829,41 @@ export const StudentsDataSheetView = () => {
                     {/* Student Profile */}
                     <td style={{ padding: '0.85rem 1.25rem' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                        <img
-                          src={st.avatar}
-                          alt={st.name}
+                        {st.avatar ? (
+                          <img
+                            src={st.avatar}
+                            alt={st.name}
+                            onError={(e) => {
+                              e.currentTarget.style.display = 'none';
+                              if (e.currentTarget.nextSibling) e.currentTarget.nextSibling.style.display = 'flex';
+                            }}
+                            style={{
+                              width: '36px',
+                              height: '36px',
+                              borderRadius: '10px',
+                              objectFit: 'cover',
+                              border: isCurrentUser ? '1.5px solid var(--accent-primary)' : '1px solid var(--border-default)'
+                            }}
+                          />
+                        ) : null}
+                        <div
                           style={{
+                            display: st.avatar ? 'none' : 'flex',
                             width: '36px',
                             height: '36px',
                             borderRadius: '10px',
-                            objectFit: 'cover',
-                            border: isCurrentUser ? '1.5px solid var(--accent-primary)' : '1px solid var(--border-default)'
+                            backgroundColor: 'rgba(37, 99, 235, 0.12)',
+                            color: '#2563EB',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontWeight: 700,
+                            fontSize: '0.8rem',
+                            border: isCurrentUser ? '1.5px solid var(--accent-primary)' : '1px solid var(--border-default)',
+                            flexShrink: 0
                           }}
-                        />
+                        >
+                          {(st.name || 'S').slice(0, 2).toUpperCase()}
+                        </div>
                         <div>
                           <div style={{ fontWeight: 700, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
                             <span>{st.name}</span>
@@ -888,32 +935,52 @@ export const StudentsDataSheetView = () => {
                           width: 'fit-content'
                         }}
                       >
-                        <span
-                          style={{
-                            fontFamily: 'var(--font-mono)',
-                            fontSize: '0.78rem',
-                            fontWeight: 600,
-                            color: isPasswordVisible ? 'var(--accent-primary)' : 'var(--text-muted)'
-                          }}
-                        >
-                          {isPasswordVisible ? st.password : '••••••••••••'}
-                        </span>
+                        {st.password ? (
+                          <>
+                            <span
+                              style={{
+                                fontFamily: 'var(--font-mono)',
+                                fontSize: '0.78rem',
+                                fontWeight: 600,
+                                color: isPasswordVisible ? 'var(--accent-primary)' : 'var(--text-muted)'
+                              }}
+                            >
+                              {isPasswordVisible ? st.password : '••••••••••••'}
+                            </span>
 
-                        <button
-                          onClick={() => togglePasswordVisibility(st.id)}
-                          style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
-                          title={isPasswordVisible ? 'Hide Password' : 'Show Password'}
-                        >
-                          {isPasswordVisible ? <EyeOff size={13} /> : <Eye size={13} />}
-                        </button>
+                            <button
+                              onClick={() => togglePasswordVisibility(st.id)}
+                              style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
+                              title={isPasswordVisible ? 'Hide Password' : 'Show Password'}
+                            >
+                              {isPasswordVisible ? <EyeOff size={13} /> : <Eye size={13} />}
+                            </button>
 
-                        <button
-                          onClick={() => handleCopy(st.password, `pass_${st.id}`)}
-                          style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
-                          title="Copy Password"
-                        >
-                          {copiedField === `pass_${st.id}` ? <Check size={13} color="var(--accent-primary)" /> : <Copy size={13} />}
-                        </button>
+                            <button
+                              onClick={() => handleCopy(st.password, `pass_${st.id}`)}
+                              style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
+                              title="Copy Password"
+                            >
+                              {copiedField === `pass_${st.id}` ? <Check size={13} color="var(--accent-primary)" /> : <Copy size={13} />}
+                            </button>
+                          </>
+                        ) : (
+                          <span
+                            style={{
+                              fontFamily: 'var(--font-sans)',
+                              fontSize: '0.74rem',
+                              fontWeight: 600,
+                              color: 'var(--text-muted)',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '0.3rem'
+                            }}
+                            title="Database student credentials are cryptographically protected (one-way bcrypt hashed). Use Reset to issue a temporary password."
+                          >
+                            <ShieldCheck size={13} color="#059669" />
+                            <span>Protected</span>
+                          </span>
+                        )}
 
                         <button
                           onClick={() => setResetTargetStudent(st)}
@@ -930,7 +997,7 @@ export const StudentsDataSheetView = () => {
                             fontWeight: 600,
                             cursor: 'pointer'
                           }}
-                          title="Reset student password"
+                          title="Generate temporary password for this student"
                         >
                           <KeyRound size={12} />
                           <span>Reset</span>

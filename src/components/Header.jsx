@@ -409,11 +409,34 @@ export const Header = ({ onOpenAddEvent }) => {
           onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'var(--border-hover)'; }}
           onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'var(--border-default)'; }}
         >
-          <img
-            src={user?.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80'}
-            alt={user?.name || 'User'}
-            style={{ width: '28px', height: '28px', borderRadius: '50%', objectFit: 'cover' }}
-          />
+          {user?.avatar ? (
+            <img
+              src={user.avatar}
+              alt={user?.name || 'User'}
+              onError={(e) => {
+                e.currentTarget.style.display = 'none';
+                if (e.currentTarget.nextSibling) e.currentTarget.nextSibling.style.display = 'flex';
+              }}
+              style={{ width: '28px', height: '28px', borderRadius: '50%', objectFit: 'cover' }}
+            />
+          ) : null}
+          <div
+            style={{
+              display: user?.avatar ? 'none' : 'flex',
+              width: '28px',
+              height: '28px',
+              borderRadius: '50%',
+              backgroundColor: 'rgba(37, 99, 235, 0.15)',
+              color: '#2563EB',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: '0.72rem',
+              fontWeight: 800,
+              flexShrink: 0
+            }}
+          >
+            {(user?.name || 'U').slice(0, 2).toUpperCase()}
+          </div>
           <span style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-primary)' }}>
             {user?.name ? user.name.split(' ')[0] : 'User'}
           </span>

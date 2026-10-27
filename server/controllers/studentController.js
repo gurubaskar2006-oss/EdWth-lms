@@ -73,12 +73,13 @@ export const createStudent = async (req, res) => {
   const finalPassword = password || `${firstName}#Nexus${Math.floor(10 + Math.random() * 89)}!`;
 
   try {
+    const hashedPassword = await bcrypt.hash(finalPassword, 10);
     const newStudent = await User.create({
       tenantId: req.tenantId, // Force tenant isolation
       studentId: finalStudentId,
       name: name.trim(),
       email: finalEmail.toLowerCase(),
-      password: finalPassword, // Note: In production this would be hashed in a pre-save hook
+      password: hashedPassword,
       role: role || 'student',
       avatar: `https://images.unsplash.com/photo-${1500000000000 + Math.floor(Math.random() * 50000000)}?w=150&auto=format&fit=crop&q=80`,
       major: major || 'Computer Science & AI',
