@@ -25,6 +25,7 @@ const submissionSchema = new mongoose.Schema({
   studentIdentifier: String,
   submissionText: String,
   score: Number,
+  marks: Number,
   feedback: String,
   submittedAt: {
     type: Date,

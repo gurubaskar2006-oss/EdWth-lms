@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useLMS } from '../context/LMSContext';
 import { usePageTitle } from '../hooks/usePageTitle';
+import { PasskeyManagementCard } from '../components/PasskeyManagementCard';
 import {
   User,
   Phone,
@@ -10,6 +11,7 @@ import {
   CheckCircle2,
   Lock,
   Shield,
+  ShieldCheck,
   KeyRound,
   Bell,
   Save,
@@ -779,6 +781,9 @@ export const SettingsView = ({ onCancel }) => {
           </div>
         </div>
       )}
+      </form>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '1.75rem' }}>
 
         {/* ─── Security & Two-Factor Authentication ─── */}
         <div className="card" style={{ padding: '1.75rem' }}>
@@ -891,6 +896,11 @@ export const SettingsView = ({ onCancel }) => {
           )}
         </div>
 
+        {/* ─── SuperAdmin FIDO2 / WebAuthn Passkeys & Security Mailbox ─── */}
+        {isSuperAdmin && (
+          <PasskeyManagementCard addToast={addToast} />
+        )}
+
         {/* ─── Notification Alerts Preferences ─── */}
         <div className="card" style={{ padding: '1.75rem' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1.25rem' }}>
@@ -922,7 +932,7 @@ export const SettingsView = ({ onCancel }) => {
             ))}
           </div>
         </div>
-      </form>
+      </div>
     </div>
   );
 };

@@ -87,10 +87,30 @@ export const InstitutionAnalyticsView = () => {
         <>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem' }}>
             {[
-              { label: `Total Enrolled ${terms?.learnerPlural || 'Students'}`, value: stats.studentsCount ?? 0, sub: 'Across active cohorts', color: '#059669' },
-              { label: 'Overall Attendance Rate', value: `${stats.averageAttendanceRate ?? 0}%`, sub: `${stats.attendanceSessionsCount ?? 0} sessions verified`, color: '#6366F1' },
-              { label: `${terms?.assignmentLabel || 'Evaluation'} SLA Rate`, value: `${stats.evaluationRate ?? 0}%`, sub: `${stats.evaluationsCount ?? 0} evaluated of ${stats.submissionsCount ?? 0}`, color: '#2563EB' },
-              { label: `Active ${terms?.educatorPlural || 'Teachers'}`, value: stats.trainersCount ?? 0, sub: 'Faculty roster', color: '#D97706' }
+              { 
+                label: `Total Enrolled ${terms?.learnerPlural || 'Students'}`, 
+                value: stats.studentsCount ?? 0, 
+                sub: (stats.studentsCount || 0) > 0 ? 'Across active cohorts' : 'No students enrolled yet', 
+                color: '#059669' 
+              },
+              { 
+                label: 'Overall Attendance Rate', 
+                value: stats.averageAttendanceRate != null ? `${stats.averageAttendanceRate}%` : '—', 
+                sub: (stats.attendanceSessionsCount || 0) > 0 ? `${stats.attendanceSessionsCount} sessions verified` : 'No verified sessions yet', 
+                color: '#6366F1' 
+              },
+              { 
+                label: `${terms?.assignmentLabel || 'Evaluation'} SLA Rate`, 
+                value: stats.evaluationRate != null ? `${stats.evaluationRate}%` : '—', 
+                sub: (stats.submissionsCount || 0) > 0 ? `${stats.evaluationsCount ?? 0} evaluated of ${stats.submissionsCount}` : 'No submissions yet', 
+                color: '#2563EB' 
+              },
+              { 
+                label: `Active ${terms?.educatorPlural || 'Teachers'}`, 
+                value: stats.trainersCount ?? 0, 
+                sub: (stats.trainersCount || 0) > 0 ? 'Faculty roster' : 'No faculty assigned yet', 
+                color: '#D97706' 
+              }
             ].map((item, i) => (
               <div key={i} className="card" style={{ padding: '1.4rem' }}>
                 <div style={{ fontSize: '1.85rem', fontWeight: 800, color: 'var(--text-primary)' }}>{item.value}</div>
@@ -246,6 +266,7 @@ export const SubjectsCatalogView = () => {
   const [modalOpen, setModalOpen] = useState(false);
   const [newCourse, setNewCourse] = useState({ title: '', code: '', department: 'School of Computing', credits: '3' });
   const [submitting, setSubmitting] = useState(false);
+  const [deletingCourseId, setDeletingCourseId] = useState(null);
 
   const fetchCourses = async () => {
     try {
@@ -257,6 +278,36 @@ export const SubjectsCatalogView = () => {
       setError(err.message || 'Failed to load course catalog');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleDeleteCourse = async (course) => {
+    if (!window.confirm(`Are you sure you want to delete course "${course.title}" (${course.code})?`)) {
+      return;
+    }
+    setDeletingCourseId(course._id);
+    try {
+      const res = await apiService.deleteAdminCourse(course._id, false);
+      if (res?.success) {
+        addToast('Course Deleted', `Course ${course.title} was removed.`, 'emerald');
+        fetchCourses();
+      } else if (res?.hasDependencies) {
+        if (window.confirm(`This course has active assignments or assessments linked to it.\n\nForce delete and cascade cleanup?`)) {
+          const forceRes = await apiService.deleteAdminCourse(course._id, true);
+          if (forceRes?.success) {
+            addToast('Course Force Deleted', `Course and linked resources were removed.`, 'emerald');
+            fetchCourses();
+          } else {
+            addToast('Deletion Error', forceRes?.message || 'Failed to force delete course.', 'rose');
+          }
+        }
+      } else {
+        addToast('Deletion Error', res?.message || 'Failed to delete course.', 'rose');
+      }
+    } catch (err) {
+      addToast('Error', err?.message || 'Network error deleting course.', 'rose');
+    } finally {
+      setDeletingCourseId(null);
     }
   };
 
@@ -332,7 +383,22 @@ export const SubjectsCatalogView = () => {
                 <span style={{ fontSize: '0.74rem', fontFamily: 'var(--font-mono)', fontWeight: 800, padding: '0.2rem 0.55rem', borderRadius: '6px', backgroundColor: 'rgba(217, 119, 6, 0.12)', color: '#D97706' }}>
                   {c.code || 'CRS'}
                 </span>
-                <span style={{ fontSize: '0.74rem', fontWeight: 700, color: '#059669' }}>{c.status || 'Active'}</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                  <span style={{ fontSize: '0.74rem', fontWeight: 700, color: '#059669' }}>{c.status || 'Active'}</span>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleDeleteCourse(c);
+                    }}
+                    disabled={deletingCourseId === c._id}
+                    className="btn-icon"
+                    style={{ width: '26px', height: '26px', color: '#EF4444' }}
+                    title="Delete Course"
+                  >
+                    <Trash2 size={13} />
+                  </button>
+                </div>
               </div>
               <h3 style={{ fontSize: '1.1rem', fontWeight: 800, color: 'var(--text-primary)', margin: '0 0 0.4rem' }}>
                 {c.title}
@@ -418,19 +484,28 @@ export const SubjectsCatalogView = () => {
 
 // ─── 4. Academic Structure View ───────────────────────────────────────────────
 export const AcademicStructureView = () => {
-  const { terms, institutionType, portalConfig } = useLMS();
+  const { terms, institutionType, user } = useLMS();
   const [batches, setBatches] = useState([]);
+  const [institution, setInstitution] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let mounted = true;
-    apiService.getAdminBatches()
-      .then((data) => {
-        if (mounted && data?.batches && Array.isArray(data.batches)) {
-          setBatches(data.batches);
+    Promise.all([
+      apiService.getAdminBatches().catch(() => ({ batches: [] })),
+      apiService.getAdminInstitutionProfile().catch(() => ({ institution: null }))
+    ])
+      .then(([batchesData, profileData]) => {
+        if (mounted) {
+          if (batchesData?.batches && Array.isArray(batchesData.batches)) {
+            setBatches(batchesData.batches);
+          }
+          if (profileData?.institution) {
+            setInstitution(profileData.institution);
+          }
         }
       })
-      .catch((err) => console.error('Failed to load structure batches:', err))
+      .catch((err) => console.error('Failed to load academic structure data:', err))
       .finally(() => {
         if (mounted) setLoading(false);
       });
@@ -438,6 +513,13 @@ export const AcademicStructureView = () => {
       mounted = false;
     };
   }, []);
+
+  const academicConfig = institution?.settings?.academicConfig;
+  const isConfigured = Boolean(
+    institution &&
+    academicConfig &&
+    (academicConfig.academicSession || (academicConfig.gradingScale && academicConfig.gradingScale.length > 0))
+  );
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
@@ -450,44 +532,59 @@ export const AcademicStructureView = () => {
         </p>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '1.25rem' }}>
-        <div className="card" style={{ padding: '1.5rem', borderRadius: '16px' }}>
-          <h3 style={{ fontSize: '1.05rem', fontWeight: 800, margin: '0 0 0.75rem', color: 'var(--text-primary)' }}>
-            Active Term & Schedule
-          </h3>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', fontSize: '0.84rem', color: 'var(--text-secondary)' }}>
-            <div>Campus Institution: <strong style={{ color: 'var(--text-primary)' }}>{portalConfig?.companyName || 'Campus Operations'}</strong></div>
-            <div>Active Cohorts in Session: <strong>{loading ? 'Loading...' : `${batches.length} ${terms?.groupPlural || 'Batches'}`}</strong></div>
-            <div>Academic Session: <strong>2026 – 2027 Academic Year</strong></div>
-            <div>Minimum Attendance Required: <strong>75% Verified Calls</strong></div>
-            <div>Evaluation Turnaround Standard: <strong>48 Hours SLA</strong></div>
+      {loading ? (
+        <div className="card" style={{ padding: '3rem', textAlign: 'center', color: 'var(--text-secondary)' }}>
+          Loading academic structure configuration...
+        </div>
+      ) : !isConfigured ? (
+        <div className="card" style={{ padding: '3rem 2rem', textAlign: 'center', borderRadius: '16px', border: '1px dashed var(--border-default)' }}>
+          <div style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--text-primary)', marginBottom: '0.5rem' }}>
+            Institution configuration has not been completed.
+          </div>
+          <p style={{ color: 'var(--text-secondary)', fontSize: '0.88rem', maxWidth: '620px', margin: '0 auto 1.5rem', lineHeight: 1.5 }}>
+            Academic terms, verified grading scales, and attendance criteria have not been provisioned for this tenant. 
+            All academic setup must be configured by an authorized administrator through official institution management workflows.
+          </p>
+          <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+            Active Tenant: <strong>{institution?.name || user?.tenantName || 'Unassigned / Global Console'}</strong> · Mode: <strong>{institution?.institutionType || institutionType || 'Unconfigured'}</strong>
           </div>
         </div>
+      ) : (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '1.25rem' }}>
+          <div className="card" style={{ padding: '1.5rem', borderRadius: '16px' }}>
+            <h3 style={{ fontSize: '1.05rem', fontWeight: 800, margin: '0 0 0.75rem', color: 'var(--text-primary)' }}>
+              Active Term & Schedule
+            </h3>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', fontSize: '0.84rem', color: 'var(--text-secondary)' }}>
+              <div>Campus Institution: <strong style={{ color: 'var(--text-primary)' }}>{institution.name}</strong></div>
+              <div>Active Cohorts in Session: <strong>{`${batches.length} ${terms?.groupPlural || 'Batches'}`}</strong></div>
+              <div>Academic Session: <strong>{academicConfig.academicSession || 'Not Specified'}</strong></div>
+              <div>Minimum Attendance Required: <strong>{academicConfig.minimumAttendance ? `${academicConfig.minimumAttendance}% Verified Calls` : 'Not Specified'}</strong></div>
+              <div>Evaluation Turnaround Standard: <strong>{academicConfig.evaluationSlaHours ? `${academicConfig.evaluationSlaHours} Hours SLA` : 'Not Specified'}</strong></div>
+            </div>
+          </div>
 
-        <div className="card" style={{ padding: '1.5rem', borderRadius: '16px' }}>
-          <h3 style={{ fontSize: '1.05rem', fontWeight: 800, margin: '0 0 0.75rem', color: 'var(--text-primary)' }}>
-            Institutional Grading Scale
-          </h3>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem', fontSize: '0.82rem' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.35rem 0', borderBottom: '1px solid var(--border-default)' }}>
-              <span>A+ / Outstanding</span>
-              <strong style={{ color: '#059669' }}>95% – 100% (4.0 GPA)</strong>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.35rem 0', borderBottom: '1px solid var(--border-default)' }}>
-              <span>A / Excellent</span>
-              <strong style={{ color: '#059669' }}>88% – 94% (3.8 GPA)</strong>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.35rem 0', borderBottom: '1px solid var(--border-default)' }}>
-              <span>B / Proficient</span>
-              <strong style={{ color: '#2563EB' }}>80% – 87% (3.2 GPA)</strong>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.35rem 0' }}>
-              <span>Passing Criteria Minimum</span>
-              <strong style={{ color: '#D97706' }}>75% Attendance & 60% Marks</strong>
-            </div>
+          <div className="card" style={{ padding: '1.5rem', borderRadius: '16px' }}>
+            <h3 style={{ fontSize: '1.05rem', fontWeight: 800, margin: '0 0 0.75rem', color: 'var(--text-primary)' }}>
+              Institutional Grading Scale
+            </h3>
+            {academicConfig.gradingScale && academicConfig.gradingScale.length > 0 ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem', fontSize: '0.82rem' }}>
+                {academicConfig.gradingScale.map((gradeItem, idx) => (
+                  <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', padding: '0.35rem 0', borderBottom: '1px solid var(--border-default)' }}>
+                    <span>{gradeItem.grade} {gradeItem.label ? `/ ${gradeItem.label}` : ''}</span>
+                    <strong style={{ color: '#059669' }}>
+                      {gradeItem.minPercentage}% – {gradeItem.maxPercentage}% {gradeItem.gpa !== undefined ? `(${gradeItem.gpa} GPA)` : ''}
+                    </strong>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>No custom grading scale configured for this institution.</div>
+            )}
           </div>
         </div>
-      </div>
+      )}
 
       {/* Cohorts Structure Table */}
       <div className="card" style={{ padding: '1.5rem', borderRadius: '16px' }}>
@@ -1382,37 +1479,93 @@ export const AuditLogsView = () => {
   const [auditLogs, setAuditLogs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [actionFilter, setActionFilter] = useState('');
+  const [actorFilter, setActorFilter] = useState('');
+
+  const fetchLogs = async (targetPage = page, action = actionFilter, actor = actorFilter) => {
+    try {
+      setLoading(true);
+      const res = await apiService.getAdminAuditLogs({
+        page: targetPage,
+        limit: 25,
+        action: action || undefined,
+        actor: actor || undefined
+      });
+      setAuditLogs(res.logs || []);
+      setTotal(res.total || 0);
+      setPage(res.page || targetPage);
+      setTotalPages(res.totalPages || 1);
+      setError(null);
+    } catch (err) {
+      setError(err.message || 'Failed to load security audit logs');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    let mounted = true;
-    const fetchLogs = async () => {
-      try {
-        setLoading(true);
-        const res = await apiService.getAdminAuditLogs();
-        if (mounted) {
-          setAuditLogs(res.logs || []);
-          setError(null);
-        }
-      } catch (err) {
-        if (mounted) setError(err.message || 'Failed to load security audit logs');
-      } finally {
-        if (mounted) setLoading(false);
-      }
-    };
-    fetchLogs();
-    return () => { mounted = false; };
+    fetchLogs(1, actionFilter, actorFilter);
   }, []);
+
+  const handleFilterSubmit = (e) => {
+    e.preventDefault();
+    fetchLogs(1, actionFilter, actorFilter);
+  };
+
+  const handleResetFilters = () => {
+    setActionFilter('');
+    setActorFilter('');
+    fetchLogs(1, '', '');
+  };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-      <div>
-        <h2 style={{ fontSize: '1.35rem', fontWeight: 800, color: 'var(--text-primary)', margin: 0 }}>
-          Security & Identity Audit Trails
-        </h2>
-        <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', marginTop: '0.25rem' }}>
-          Server-authoritative immutable audit logs for authentication, temporary password resets, and RBAC actions
-        </p>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '1rem' }}>
+        <div>
+          <h2 style={{ fontSize: '1.35rem', fontWeight: 800, color: 'var(--text-primary)', margin: 0 }}>
+            Security & Identity Audit Trails
+          </h2>
+          <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', marginTop: '0.25rem' }}>
+            Server-authoritative immutable audit logs for authentication, temporary password resets, and RBAC actions
+          </p>
+        </div>
       </div>
+
+      {/* Filter Toolbar */}
+      <form onSubmit={handleFilterSubmit} className="card" style={{ padding: '1rem 1.25rem', borderRadius: '12px', display: 'flex', flexWrap: 'wrap', gap: '0.75rem', alignItems: 'center' }}>
+        <input
+          type="text"
+          placeholder="Filter by actor email..."
+          value={actorFilter}
+          onChange={(e) => setActorFilter(e.target.value)}
+          style={{ flex: '1 1 200px', padding: '0.5rem 0.75rem', borderRadius: '8px', fontSize: '0.84rem' }}
+        />
+        <select
+          value={actionFilter}
+          onChange={(e) => setActionFilter(e.target.value)}
+          style={{ flex: '1 1 200px', padding: '0.5rem 0.75rem', borderRadius: '8px', fontSize: '0.84rem' }}
+        >
+          <option value="">All Security Actions</option>
+          <option value="AUTH_LOGIN_SUCCESS">AUTH_LOGIN_SUCCESS</option>
+          <option value="AUTH_LOGIN_FAILED">AUTH_LOGIN_FAILED</option>
+          <option value="SUPERADMIN_LOGIN_PASSWORD_ONLY_TESTING">SUPERADMIN_LOGIN_PASSWORD_ONLY_TESTING</option>
+          <option value="USER_PASSWORD_RESET">USER_PASSWORD_RESET</option>
+          <option value="COMPANY_ADMIN_INSTITUTION_REGISTERED">COMPANY_ADMIN_INSTITUTION_REGISTERED</option>
+          <option value="COMPANY_ADMIN_INSTITUTION_UPDATED">COMPANY_ADMIN_INSTITUTION_UPDATED</option>
+          <option value="SECURITY_POLICY_UPDATED">SECURITY_POLICY_UPDATED</option>
+        </select>
+        <button type="submit" className="btn-secondary" style={{ fontSize: '0.82rem', padding: '0.5rem 1rem' }}>
+          Apply Filter
+        </button>
+        {(actionFilter || actorFilter) && (
+          <button type="button" onClick={handleResetFilters} className="btn-ghost" style={{ fontSize: '0.82rem', padding: '0.5rem 0.75rem' }}>
+            Clear
+          </button>
+        )}
+      </form>
 
       <div className="card" style={{ padding: 0, borderRadius: '16px', overflow: 'hidden' }}>
         {loading ? (
@@ -1426,113 +1579,478 @@ export const AuditLogsView = () => {
             No security audit log entries recorded in this tenant scope.
           </div>
         ) : (
-          <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.86rem' }}>
-            <thead>
-              <tr style={{ backgroundColor: 'var(--bg-secondary)', borderBottom: '1px solid var(--border-default)' }}>
-                <th style={{ padding: '1rem 1.25rem', fontWeight: 700, color: 'var(--text-secondary)' }}>Security Action</th>
-                <th style={{ padding: '1rem 1.25rem', fontWeight: 700, color: 'var(--text-secondary)' }}>Actor</th>
-                <th style={{ padding: '1rem 1.25rem', fontWeight: 700, color: 'var(--text-secondary)' }}>Role</th>
-                <th style={{ padding: '1rem 1.25rem', fontWeight: 700, color: 'var(--text-secondary)' }}>Status / Result</th>
-                <th style={{ padding: '1rem 1.25rem', fontWeight: 700, color: 'var(--text-secondary)' }}>Timestamp</th>
-              </tr>
-            </thead>
-            <tbody>
-              {auditLogs.map((log, i) => (
-                <tr key={log._id || i} style={{ borderBottom: '1px solid var(--border-default)' }}>
-                  <td style={{ padding: '1rem 1.25rem', fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: '0.82rem', color: 'var(--text-primary)' }}>
-                    {log.action}
-                  </td>
-                  <td style={{ padding: '1rem 1.25rem', color: 'var(--text-secondary)' }}>{log.actorEmail || log.actor || 'System'}</td>
-                  <td style={{ padding: '1rem 1.25rem', textTransform: 'capitalize' }}>{log.actorRole || log.role || 'System'}</td>
-                  <td style={{ padding: '1rem 1.25rem' }}>
-                    <span style={{
-                      fontSize: '0.74rem',
-                      fontWeight: 700,
-                      padding: '0.15rem 0.5rem',
-                      borderRadius: '4px',
-                      backgroundColor: (log.status || '').toLowerCase().includes('failed') || (log.status || '').toLowerCase().includes('blocked')
-                        ? 'rgba(239, 68, 68, 0.1)'
-                        : 'rgba(5, 150, 105, 0.1)',
-                      color: (log.status || '').toLowerCase().includes('failed') || (log.status || '').toLowerCase().includes('blocked')
-                        ? '#f87171'
-                        : '#059669'
-                    }}>
-                      {log.status || 'Audited'}
-                    </span>
-                  </td>
-                  <td style={{ padding: '1rem 1.25rem', color: 'var(--text-secondary)', fontSize: '0.8rem' }}>
-                    {log.createdAt ? new Date(log.createdAt).toLocaleString() : (log.time || 'N/A')}
-                  </td>
+          <>
+            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.86rem' }}>
+              <thead>
+                <tr style={{ backgroundColor: 'var(--bg-secondary)', borderBottom: '1px solid var(--border-default)' }}>
+                  <th style={{ padding: '1rem 1.25rem', fontWeight: 700, color: 'var(--text-secondary)' }}>Security Action</th>
+                  <th style={{ padding: '1rem 1.25rem', fontWeight: 700, color: 'var(--text-secondary)' }}>Actor</th>
+                  <th style={{ padding: '1rem 1.25rem', fontWeight: 700, color: 'var(--text-secondary)' }}>Role</th>
+                  <th style={{ padding: '1rem 1.25rem', fontWeight: 700, color: 'var(--text-secondary)' }}>Status / Result</th>
+                  <th style={{ padding: '1rem 1.25rem', fontWeight: 700, color: 'var(--text-secondary)' }}>Timestamp</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {auditLogs.map((log, i) => {
+                  const isBlocked = (log.action || '').includes('FAIL') || 
+                                    (log.action || '').includes('BLOCKED') || 
+                                    (log.action || '').includes('DENIED') ||
+                                    log.details?.status === 'failed';
+                  return (
+                    <tr key={log._id || i} style={{ borderBottom: '1px solid var(--border-default)' }}>
+                      <td style={{ padding: '1rem 1.25rem', fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: '0.82rem', color: 'var(--text-primary)' }}>
+                        {log.action}
+                      </td>
+                      <td style={{ padding: '1rem 1.25rem', color: 'var(--text-secondary)' }}>
+                        {log.actor?.email || log.actorEmail || log.actor || 'System'}
+                      </td>
+                      <td style={{ padding: '1rem 1.25rem', textTransform: 'capitalize' }}>
+                        {log.actor?.role || log.actorRole || log.role || 'System'}
+                      </td>
+                      <td style={{ padding: '1rem 1.25rem' }}>
+                        <span style={{
+                          fontSize: '0.74rem',
+                          fontWeight: 700,
+                          padding: '0.15rem 0.5rem',
+                          borderRadius: '4px',
+                          backgroundColor: isBlocked
+                            ? 'rgba(239, 68, 68, 0.1)'
+                            : 'rgba(5, 150, 105, 0.1)',
+                          color: isBlocked
+                            ? '#f87171'
+                            : '#059669'
+                        }}>
+                          {isBlocked ? 'Blocked' : 'Audited'}
+                        </span>
+                      </td>
+                      <td style={{ padding: '1rem 1.25rem', color: 'var(--text-secondary)', fontSize: '0.8rem' }}>
+                        {log.timestamp ? new Date(log.timestamp).toLocaleString() : (log.createdAt ? new Date(log.createdAt).toLocaleString() : 'N/A')}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+
+            {/* Pagination Controls */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '1rem 1.25rem', borderTop: '1px solid var(--border-default)', fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
+              <div>
+                Showing <strong>{auditLogs.length}</strong> of <strong>{total}</strong> verified audit events
+              </div>
+              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                <button
+                  type="button"
+                  disabled={page <= 1 || loading}
+                  onClick={() => fetchLogs(page - 1, actionFilter, actorFilter)}
+                  className="btn-secondary"
+                  style={{ padding: '0.35rem 0.75rem', fontSize: '0.78rem' }}
+                >
+                  Previous
+                </button>
+                <span>Page <strong>{page}</strong> of <strong>{totalPages}</strong></span>
+                <button
+                  type="button"
+                  disabled={page >= totalPages || loading}
+                  onClick={() => fetchLogs(page + 1, actionFilter, actorFilter)}
+                  className="btn-secondary"
+                  style={{ padding: '0.35rem 0.75rem', fontSize: '0.78rem' }}
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          </>
         )}
       </div>
     </div>
   );
 };
 
-// ─── 10. Role Permissions Matrix View ─────────────────────────────────────────
-export const PermissionsView = () => {
-  const permissions = [
-    { module: 'Live Attendance Broadcast', student: 'Confirm Only', trainer: 'Initiate & Audit', admin: 'Full Oversight' },
-    { module: 'Student Password Reset', student: 'Disabled (Educator-Assisted)', trainer: 'Authorized (Assigned Cohort)', admin: 'Full Authority' },
-    { module: 'Assignment Grading & Marks', student: 'View Own', trainer: 'Grade & Feedback', admin: 'Full Oversight' },
-    { module: 'Cohort & Course Provisioning', student: 'No Access', trainer: 'View Assigned', admin: 'Full Authority' },
-    { module: 'Security Audit Inspection', student: 'No Access', trainer: 'No Access', admin: 'Full Authority' }
-  ];
+// ─── 10. Platform Security Policies View (Active Policy Governance) ────────────
+export const SecurityPoliciesView = () => {
+  const { user, addToast } = useLMS();
+  const isSuperAdmin = user?.role === 'superadmin';
+  const [policyData, setPolicyData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
+
+  // Form states for SuperAdmin editing
+  const [requireAdminMfa, setRequireAdminMfa] = useState(true);
+  const [requireTrainerMfa, setRequireTrainerMfa] = useState(false);
+  const [minLength, setMinLength] = useState(12);
+  const [requireUppercase, setRequireUppercase] = useState(true);
+  const [requireNumbers, setRequireNumbers] = useState(true);
+  const [requireSpecialChars, setRequireSpecialChars] = useState(true);
+  const [sessionTimeout, setSessionTimeout] = useState(120);
+  const [maxConcurrentSessions, setMaxConcurrentSessions] = useState(3);
+
+  const fetchPolicy = async () => {
+    try {
+      setLoading(true);
+      const res = await apiService.getSecurityPolicies();
+      if (res?.success && res.policy) {
+        setPolicyData(res.policy);
+        const p = res.policy;
+        if (p.mfaPolicy) {
+          setRequireAdminMfa(p.mfaPolicy.requireAdminMfa ?? true);
+          setRequireTrainerMfa(p.mfaPolicy.requireTrainerMfa ?? false);
+        }
+        if (p.passwordPolicy) {
+          setMinLength(p.passwordPolicy.minLength ?? 12);
+          setRequireUppercase(p.passwordPolicy.requireUppercase ?? true);
+          setRequireNumbers(p.passwordPolicy.requireNumbers ?? true);
+          setRequireSpecialChars(p.passwordPolicy.requireSpecialChars ?? true);
+        }
+        if (p.sessionPolicy) {
+          setSessionTimeout(p.sessionPolicy.sessionTimeoutMinutes ?? 120);
+          setMaxConcurrentSessions(p.sessionPolicy.maxConcurrentSessions ?? 3);
+        }
+      }
+      setError(null);
+    } catch (err) {
+      setError(err.message || 'Failed to load security policies');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchPolicy();
+  }, []);
+
+  const handleSave = async (e) => {
+    e.preventDefault();
+    if (!isSuperAdmin) return;
+    try {
+      setSaving(true);
+      const payload = {
+        mfaPolicy: {
+          requireAdminMfa,
+          requireTrainerMfa
+        },
+        passwordPolicy: {
+          minLength: parseInt(minLength),
+          requireUppercase,
+          requireNumbers,
+          requireSpecialChars
+        },
+        sessionPolicy: {
+          sessionTimeoutMinutes: parseInt(sessionTimeout),
+          maxConcurrentSessions: parseInt(maxConcurrentSessions)
+        }
+      };
+      const res = await apiService.updateSecurityPolicies(payload);
+      if (res?.success) {
+        addToast('Security Policies Updated', 'Platform security policy configuration updated and audited.', 'emerald');
+        fetchPolicy();
+      } else {
+        addToast('Update Failed', res.message || 'Could not update policies.', 'rose');
+      }
+    } catch (err) {
+      addToast('Error', err.message || 'Failed to update security policies', 'rose');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const isFrozen = policyData?.runtimeContext?.superAdmin2FaFrozen;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-      <div>
-        <h2 style={{ fontSize: '1.35rem', fontWeight: 800, color: 'var(--text-primary)', margin: 0 }}>
-          Role-Based Access Control (RBAC) Policies
-        </h2>
-        <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', marginTop: '0.25rem' }}>
-          Enforced server-side authorization boundaries by role and tenant
-        </p>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '1rem' }}>
+        <div>
+          <h2 style={{ fontSize: '1.35rem', fontWeight: 800, color: 'var(--text-primary)', margin: 0 }}>
+            Platform Security Policies & RBAC
+          </h2>
+          <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', marginTop: '0.25rem' }}>
+            {isSuperAdmin
+              ? 'Global Super-Administrator governance of authentication, session lifetimes, and tenant isolation'
+              : 'Enforced server-side platform security configuration (Read-Only Organization View)'}
+          </p>
+        </div>
       </div>
 
-      <div className="card" style={{ padding: 0, borderRadius: '16px', overflow: 'hidden' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.86rem' }}>
-          <thead>
-            <tr style={{ backgroundColor: 'var(--bg-secondary)', borderBottom: '1px solid var(--border-default)' }}>
-              <th style={{ padding: '1rem 1.25rem', fontWeight: 700, color: 'var(--text-secondary)' }}>System Capability</th>
-              <th style={{ padding: '1rem 1.25rem', fontWeight: 700, color: '#059669' }}>Learner (Student)</th>
-              <th style={{ padding: '1rem 1.25rem', fontWeight: 700, color: '#6366F1' }}>Faculty (Trainer / Teacher)</th>
-              <th style={{ padding: '1rem 1.25rem', fontWeight: 700, color: '#D97706' }}>Administrator (Admin)</th>
-            </tr>
-          </thead>
-          <tbody>
-            {permissions.map((p, i) => (
-              <tr key={i} style={{ borderBottom: '1px solid var(--border-default)' }}>
-                <td style={{ padding: '1rem 1.25rem', fontWeight: 700, color: 'var(--text-primary)' }}>{p.module}</td>
-                <td style={{ padding: '1rem 1.25rem', color: 'var(--text-secondary)' }}>{p.student}</td>
-                <td style={{ padding: '1rem 1.25rem', color: 'var(--text-secondary)', fontWeight: 600 }}>{p.trainer}</td>
-                <td style={{ padding: '1rem 1.25rem', color: 'var(--text-primary)', fontWeight: 700 }}>{p.admin}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      {isSuperAdmin && isFrozen && (
+        <div style={{ padding: '0.85rem 1.25rem', borderRadius: '12px', backgroundColor: 'rgba(217, 119, 6, 0.1)', border: '1px solid rgba(217, 119, 6, 0.3)', color: '#D97706', fontSize: '0.84rem' }}>
+          <strong>⚠️ Non-Production Failsafe Notice:</strong> SuperAdmin 2FA is temporarily frozen in development/staging via configuration (<code>ENABLE_SUPERADMIN_2FA=false</code>) to enable onboarding and testing. Mandatory production 2FA enforcement remains intact and cannot be disabled.
+        </div>
+      )}
+
+      {loading ? (
+        <div className="card" style={{ padding: '3rem', textAlign: 'center', color: 'var(--text-secondary)' }}>
+          Loading platform security policies...
+        </div>
+      ) : error ? (
+        <div className="card" style={{ padding: '1.5rem', color: '#EF4444' }}>{error}</div>
+      ) : (
+        <form onSubmit={handleSave} style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '1.25rem' }}>
+            
+            {/* MFA Policy Card */}
+            <div className="card" style={{ padding: '1.5rem', borderRadius: '16px' }}>
+              <h3 style={{ fontSize: '1.05rem', fontWeight: 800, margin: '0 0 1rem', color: 'var(--text-primary)' }}>
+                Multi-Factor Authentication (MFA)
+              </h3>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem', fontSize: '0.84rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.4rem 0', borderBottom: '1px solid var(--border-default)' }}>
+                  <div>
+                    <div style={{ fontWeight: 700, color: 'var(--text-primary)' }}>Super-Admin Mandatory MFA</div>
+                    <div style={{ fontSize: '0.74rem', color: 'var(--text-secondary)' }}>Passkey / TOTP / Email OTP verification</div>
+                  </div>
+                  <span style={{ fontSize: '0.75rem', fontWeight: 800, color: (isSuperAdmin && isFrozen) ? '#D97706' : '#059669', padding: '0.2rem 0.5rem', borderRadius: '4px', backgroundColor: (isSuperAdmin && isFrozen) ? 'rgba(217, 119, 6, 0.1)' : 'rgba(5, 150, 105, 0.1)' }}>
+                    {(isSuperAdmin && isFrozen) ? 'Frozen (Dev)' : 'Enforced (Prod)'}
+                  </span>
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.4rem 0', borderBottom: '1px solid var(--border-default)' }}>
+                  <div>
+                    <div style={{ fontWeight: 700, color: 'var(--text-primary)' }}>Require Admin MFA</div>
+                    <div style={{ fontSize: '0.74rem', color: 'var(--text-secondary)' }}>School & College Administrators</div>
+                  </div>
+                  {isSuperAdmin ? (
+                    <input
+                      type="checkbox"
+                      checked={requireAdminMfa}
+                      onChange={(e) => setRequireAdminMfa(e.target.checked)}
+                      style={{ transform: 'scale(1.2)' }}
+                    />
+                  ) : (
+                    <span style={{ fontWeight: 700, color: requireAdminMfa ? '#059669' : 'var(--text-muted)' }}>
+                      {requireAdminMfa ? 'Active' : 'Optional'}
+                    </span>
+                  )}
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.4rem 0' }}>
+                  <div>
+                    <div style={{ fontWeight: 700, color: 'var(--text-primary)' }}>Require Trainer / Faculty MFA</div>
+                    <div style={{ fontSize: '0.74rem', color: 'var(--text-secondary)' }}>Educator account security</div>
+                  </div>
+                  {isSuperAdmin ? (
+                    <input
+                      type="checkbox"
+                      checked={requireTrainerMfa}
+                      onChange={(e) => setRequireTrainerMfa(e.target.checked)}
+                      style={{ transform: 'scale(1.2)' }}
+                    />
+                  ) : (
+                    <span style={{ fontWeight: 700, color: requireTrainerMfa ? '#059669' : 'var(--text-muted)' }}>
+                      {requireTrainerMfa ? 'Active' : 'Optional'}
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Password Policy Card */}
+            <div className="card" style={{ padding: '1.5rem', borderRadius: '16px' }}>
+              <h3 style={{ fontSize: '1.05rem', fontWeight: 800, margin: '0 0 1rem', color: 'var(--text-primary)' }}>
+                Password Complexity & Expiration
+              </h3>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem', fontSize: '0.84rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>Minimum Password Length</span>
+                  {isSuperAdmin ? (
+                    <input
+                      type="number"
+                      min="8"
+                      max="64"
+                      value={minLength}
+                      onChange={(e) => setMinLength(e.target.value)}
+                      style={{ width: '70px', padding: '0.3rem', borderRadius: '6px', textAlign: 'center' }}
+                    />
+                  ) : (
+                    <strong>{minLength} characters</strong>
+                  )}
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ color: 'var(--text-secondary)' }}>Require Uppercase Letters</span>
+                  {isSuperAdmin ? (
+                    <input
+                      type="checkbox"
+                      checked={requireUppercase}
+                      onChange={(e) => setRequireUppercase(e.target.checked)}
+                      style={{ transform: 'scale(1.2)' }}
+                    />
+                  ) : (
+                    <span style={{ color: requireUppercase ? '#059669' : 'var(--text-muted)', fontWeight: 700 }}>
+                      {requireUppercase ? '✓ Enforced' : 'Optional'}
+                    </span>
+                  )}
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ color: 'var(--text-secondary)' }}>Require Numeric Digits</span>
+                  {isSuperAdmin ? (
+                    <input
+                      type="checkbox"
+                      checked={requireNumbers}
+                      onChange={(e) => setRequireNumbers(e.target.checked)}
+                      style={{ transform: 'scale(1.2)' }}
+                    />
+                  ) : (
+                    <span style={{ color: requireNumbers ? '#059669' : 'var(--text-muted)', fontWeight: 700 }}>
+                      {requireNumbers ? '✓ Enforced' : 'Optional'}
+                    </span>
+                  )}
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ color: 'var(--text-secondary)' }}>Require Special Characters</span>
+                  {isSuperAdmin ? (
+                    <input
+                      type="checkbox"
+                      checked={requireSpecialChars}
+                      onChange={(e) => setRequireSpecialChars(e.target.checked)}
+                      style={{ transform: 'scale(1.2)' }}
+                    />
+                  ) : (
+                    <span style={{ color: requireSpecialChars ? '#059669' : 'var(--text-muted)', fontWeight: 700 }}>
+                      {requireSpecialChars ? '✓ Enforced' : 'Optional'}
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Session Policy Card */}
+            <div className="card" style={{ padding: '1.5rem', borderRadius: '16px' }}>
+              <h3 style={{ fontSize: '1.05rem', fontWeight: 800, margin: '0 0 1rem', color: 'var(--text-primary)' }}>
+                Session & Lifecycle Boundaries
+              </h3>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem', fontSize: '0.84rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div>
+                    <div style={{ fontWeight: 700, color: 'var(--text-primary)' }}>Session Timeout</div>
+                    <div style={{ fontSize: '0.74rem', color: 'var(--text-secondary)' }}>JWT and cookie expiration</div>
+                  </div>
+                  {isSuperAdmin ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                      <input
+                        type="number"
+                        min="15"
+                        max="1440"
+                        value={sessionTimeout}
+                        onChange={(e) => setSessionTimeout(e.target.value)}
+                        style={{ width: '80px', padding: '0.3rem', borderRadius: '6px', textAlign: 'center' }}
+                      />
+                      <span>mins</span>
+                    </div>
+                  ) : (
+                    <strong>{sessionTimeout} minutes</strong>
+                  )}
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>Max Concurrent Sessions</span>
+                  {isSuperAdmin ? (
+                    <input
+                      type="number"
+                      min="1"
+                      max="10"
+                      value={maxConcurrentSessions}
+                      onChange={(e) => setMaxConcurrentSessions(e.target.value)}
+                      style={{ width: '60px', padding: '0.3rem', borderRadius: '6px', textAlign: 'center' }}
+                    />
+                  ) : (
+                    <strong>{maxConcurrentSessions} active sessions</strong>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Strict Tenant Isolation Card */}
+            <div className="card" style={{ padding: '1.5rem', borderRadius: '16px' }}>
+              <h3 style={{ fontSize: '1.05rem', fontWeight: 800, margin: '0 0 1rem', color: 'var(--text-primary)' }}>
+                Multi-Tenant Isolation Architecture
+              </h3>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', fontSize: '0.84rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#059669', fontWeight: 800 }}>
+                  <span>✓</span>
+                  <span>Strict Query-Level Tenant Scoping</span>
+                </div>
+                <p style={{ color: 'var(--text-secondary)', fontSize: '0.8rem', margin: 0, lineHeight: 1.4 }}>
+                  All queries for students, cohorts, attendance, submissions, and grades are bound to the authenticated <code>tenantId</code>. Cross-tenant access is structurally prohibited.
+                </p>
+                <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
+                  Architecture Rule: <strong>Immutable Platform Security Constraint</strong>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {isSuperAdmin && (
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '1rem', marginTop: '0.5rem' }}>
+              <button
+                type="submit"
+                disabled={saving}
+                className="btn-primary"
+                style={{ padding: '0.65rem 1.5rem', fontSize: '0.88rem' }}
+              >
+                {saving ? 'Updating Policies...' : 'Save Security Policies'}
+              </button>
+            </div>
+          )}
+        </form>
+      )}
     </div>
   );
 };
 
+export const PermissionsView = SecurityPoliciesView;
+
 // ─── 11. Institution Settings View (Tenant Configuration) ─────────────────────
 export const InstitutionSettingsView = () => {
-  const { portalConfig, updatePortalConfig, institutionType, addToast } = useLMS();
-  const [instName, setInstName] = useState(portalConfig?.companyName || (institutionType === 'school' ? 'School Learning Portal' : 'Higher Education Learning Portal'));
-  const [shortCode, setShortCode] = useState(portalConfig?.shortName || (institutionType === 'school' ? 'SCHOOL' : 'CAMPUS'));
+  const { portalConfig, updatePortalConfig, institutionType, user, addToast } = useLMS();
+  const [institution, setInstitution] = useState(null);
+  const [instName, setInstName] = useState('');
+  const [shortCode, setShortCode] = useState('');
+  const [saving, setSaving] = useState(false);
 
-  const handleSave = (e) => {
+  useEffect(() => {
+    let mounted = true;
+    apiService.getAdminInstitutionProfile()
+      .then((res) => {
+        if (mounted && res?.institution) {
+          setInstitution(res.institution);
+          setInstName(res.institution.name || portalConfig?.companyName || '');
+          setShortCode(res.institution.code || portalConfig?.shortName || '');
+        } else if (mounted) {
+          setInstName(portalConfig?.companyName || 'EdWth Academy');
+          setShortCode(portalConfig?.shortName || 'EDWTH');
+        }
+      })
+      .catch(() => {
+        if (mounted) {
+          setInstName(portalConfig?.companyName || 'EdWth Academy');
+          setShortCode(portalConfig?.shortName || 'EDWTH');
+        }
+      });
+    return () => { mounted = false; };
+  }, [portalConfig]);
+
+  const activeMode = institution?.institutionType || institutionType;
+  const isSchool = activeMode === 'school';
+  const isCollege = activeMode === 'college';
+  const isUnconfigured = !isSchool && !isCollege;
+
+  const handleSave = async (e) => {
     e.preventDefault();
-    updatePortalConfig({
-      companyName: instName,
-      shortName: shortCode
-    });
-    addToast('Institution Settings Saved', 'Branding parameters updated across all portals.', 'emerald');
+    setSaving(true);
+    try {
+      updatePortalConfig({
+        companyName: instName,
+        shortName: shortCode
+      });
+      if (institution?._id) {
+        await apiService.updateAdminInstitution(institution._id, {
+          name: instName
+        });
+      }
+      addToast('Institution Settings Saved', 'Branding parameters updated across portal views.', 'emerald');
+    } catch (err) {
+      addToast('Error', err.message || 'Could not update institution branding', 'rose');
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -1556,18 +2074,24 @@ export const InstitutionSettingsView = () => {
             Operating model provisioned and bound to your institution license.
           </p>
 
+          {isUnconfigured && (
+            <div style={{ padding: '0.65rem 0.85rem', borderRadius: '8px', backgroundColor: 'rgba(217, 119, 6, 0.1)', color: '#D97706', fontSize: '0.82rem', fontWeight: 700, marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              ⚠️ Operating mode not configured
+            </div>
+          )}
+
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
             <div
               style={{
                 padding: '1rem',
                 borderRadius: '12px',
-                border: institutionType === 'college' ? '2px solid #6366F1' : '1px solid var(--border-default)',
-                backgroundColor: institutionType === 'college' ? 'rgba(99, 102, 241, 0.12)' : 'var(--bg-secondary)',
-                opacity: institutionType === 'college' ? 1 : 0.45
+                border: isCollege ? '2px solid #6366F1' : '1px solid var(--border-default)',
+                backgroundColor: isCollege ? 'rgba(99, 102, 241, 0.12)' : 'var(--bg-secondary)',
+                opacity: isCollege ? 1 : 0.45
               }}
             >
               <div style={{ fontWeight: 800, fontSize: '0.95rem', color: 'var(--text-primary)' }}>
-                🏛️ College Mode {institutionType === 'college' && '✓'}
+                🏛️ College Mode {isCollege && '✓ Selected'}
               </div>
               <div style={{ fontSize: '0.74rem', color: 'var(--text-secondary)', marginTop: '4px' }}>
                 Batches, Courses, Assignments, Code Lab, Capstone Projects
@@ -1578,13 +2102,13 @@ export const InstitutionSettingsView = () => {
               style={{
                 padding: '1rem',
                 borderRadius: '12px',
-                border: institutionType === 'school' ? '2px solid #2563EB' : '1px solid var(--border-default)',
-                backgroundColor: institutionType === 'school' ? 'rgba(37, 99, 235, 0.12)' : 'var(--bg-secondary)',
-                opacity: institutionType === 'school' ? 1 : 0.45
+                border: isSchool ? '2px solid #2563EB' : '1px solid var(--border-default)',
+                backgroundColor: isSchool ? 'rgba(37, 99, 235, 0.12)' : 'var(--bg-secondary)',
+                opacity: isSchool ? 1 : 0.45
               }}
             >
               <div style={{ fontWeight: 800, fontSize: '0.95rem', color: 'var(--text-primary)' }}>
-                🏫 School Mode {institutionType === 'school' && '✓'}
+                🏫 School Mode {isSchool && '✓ Selected'}
               </div>
               <div style={{ fontSize: '0.74rem', color: 'var(--text-secondary)', marginTop: '4px' }}>
                 Classes, Subjects, Homework, Tests, Marks, Clean Friendly UI
@@ -1592,7 +2116,7 @@ export const InstitutionSettingsView = () => {
             </div>
           </div>
           <p style={{ fontSize: '0.74rem', color: 'var(--text-muted)', marginTop: '0.75rem', marginBottom: 0 }}>
-            Note: Tenant operating mode is server-authoritative and determined by your organization license.
+            Note: Tenant operating mode is server-authoritative and determined by your organization license. Tenant administrators cannot switch modes directly; contact your Super-Administrator to adjust provisioning.
           </p>
         </div>
 
@@ -1859,7 +2383,7 @@ export const InstitutionsDirectoryView = () => {
                   type="text"
                   value={form.name}
                   onChange={(e) => setForm({ ...form, name: e.target.value })}
-                  placeholder="e.g. Metro Technical Academy or Nexus Institute"
+                  placeholder="e.g. Metro Technical Academy or Horizon High School"
                   required
                   style={{ width: '100%', fontSize: '0.86rem' }}
                 />

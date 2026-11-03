@@ -48,6 +48,6 @@ const batchSchema = new mongoose.Schema({
   }
 }, { timestamps: true });
 
-batchSchema.index({ tenantId: 1, name: 1 });
+batchSchema.index({ tenantId: 1, name: 1 }, { unique: true });
 
 export default mongoose.model('Batch', batchSchema);

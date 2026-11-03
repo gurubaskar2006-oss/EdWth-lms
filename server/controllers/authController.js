@@ -7,9 +7,12 @@ import speakeasy from 'speakeasy';
 import qrcode from 'qrcode';
 import crypto from 'crypto';
 import { createAuditLog, createCriticalAuditLog } from '../utils/auditLogger.js';
-import { getJwtSecret } from '../config/environment.js';
+import { getJwtSecret, isSuperAdmin2FaFrozen } from '../config/environment.js';
 import { setAuthCookie, clearAuthCookie } from '../utils/cookieHelper.js';
 import { decryptTotpSecret, encryptTotpSecret, isEncrypted } from '../utils/mfaCrypto.js';
+import { isPrivilegedRole, validatePrivilegedIdentity } from '../config/privilegedIdentities.js';
+import { validatePasswordAgainstEffectivePolicy } from '../utils/passwordPolicyValidator.js';
+import { createSession, revokeSession, revokeAllUserSessions } from '../services/sessionService.js';
 
 /**
  * Escape special characters before using user input in a MongoDB $regex.
@@ -18,10 +21,33 @@ import { decryptTotpSecret, encryptTotpSecret, isEncrypted } from '../utils/mfaC
  */
 const escapeRegex = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-const generateToken = (id) => {
-  return jwt.sign({ id }, getJwtSecret(), {
-    expiresIn: '30d',
+const generateToken = (id, sessionId = null, timeoutMinutes = null) => {
+  const payload = { id };
+  if (sessionId) {
+    payload.sessionId = sessionId;
+  }
+  const expiry = timeoutMinutes ? `${timeoutMinutes}m` : '120m';
+  return jwt.sign(payload, getJwtSecret(), {
+    expiresIn: expiry,
   });
+};
+
+// Helper to safely resolve tenant context for user responses
+const resolveUserTenantContext = async (user) => {
+  let institutionType = null;
+  let tenantName = null;
+  if (user?.tenantId && mongoose.connection.readyState === 1) {
+    try {
+      const tenant = await College.findById(user.tenantId).select('name code institutionType').lean();
+      if (tenant) {
+        institutionType = tenant.institutionType || 'unconfigured';
+        tenantName = tenant.name || null;
+      }
+    } catch (tenantErr) {
+      console.warn('[AuthController] Failed to lookup tenant:', tenantErr.message);
+    }
+  }
+  return { institutionType, tenantName };
 };
 
 export const login = async (req, res) => {
@@ -58,37 +84,12 @@ export const login = async (req, res) => {
       }
     }
 
-    // Fallback: If DB query returned nothing or DB is offline (DEV/TEST ONLY, requires explicit opt-in)
-    if (!user && process.env.NODE_ENV !== 'production' && process.env.ENABLE_LEGACY_DATASHEET_FALLBACK === 'true') {
-      const { getStudents } = await import('../database/db.js');
-      const localStudents = getStudents();
-      // SECURITY: Use exact string comparison for fallback users — no regex needed
-      const matched = localStudents.find(s =>
-        (s.email?.toLowerCase() === cleanId || s.studentId?.toLowerCase() === cleanId)
-      );
-
-      if (matched) {
-        user = {
-          _id: matched.id || matched.studentId,
-          name: matched.name,
-          email: matched.email,
-          studentId: matched.studentId,
-          role: (matched.role || 'student').toLowerCase(),
-          password: matched.password,
-          isTwoFactorEnabled: false,
-          tenantId: matched.tenantId || '650000000000000000000001'
-        };
-        isMatch = (matched.password === password) || (await bcrypt.compare(password, matched.password).catch(() => false));
-      }
-    } else if (user) {
-      if (user.soft_deleted) {
+    // Explicit Zero-Demo Guard: In normal production and development, authentication strictly requires persisted MongoDB accounts.
+    if (user) {
+      if (user.soft_deleted || user.accountStatus === 'Inactive' || user.status === 'Inactive') {
         return res.status(401).json({ success: false, message: 'Account is disabled.' });
       }
       isMatch = await bcrypt.compare(password, user.password).catch(() => false);
-      if (!isMatch && process.env.NODE_ENV !== 'production' && user.password === password) {
-        // Plaintext match allowed only for legacy non-production dev seeds
-        isMatch = true;
-      }
     }
 
     if (!user || !isMatch) {
@@ -102,7 +103,27 @@ export const login = async (req, res) => {
       return res.status(401).json({ success: false, message: 'Invalid credentials.' });
     }
 
-    if (user.isTwoFactorEnabled) {
+    // SECURITY: Enforce approved privileged identity policy
+    if (isPrivilegedRole(user.role)) {
+      const identityCheck = validatePrivilegedIdentity(user.email, user.role);
+      if (!identityCheck.allowed) {
+        createAuditLog({
+          tenantId: user.tenantId || null,
+          actor: { userId: user._id, role: user.role, email: cleanId },
+          action: 'AUTH_PRIVILEGED_IDENTITY_BLOCKED',
+          details: { identifier: cleanId, role: user.role, reason: identityCheck.reason }
+        });
+        return res.status(403).json({
+          success: false,
+          code: 'UNAUTHORIZED_PRIVILEGED_IDENTITY',
+          message: identityCheck.reason || 'Access restricted: Privileged roles require an authorized organizational identity or verified email domain.'
+        });
+      }
+    }
+
+    const isSuperAdminFrozen = user.role === 'superadmin' && isSuperAdmin2FaFrozen();
+
+    if (user.isTwoFactorEnabled && !isSuperAdminFrozen) {
       const preAuthToken = jwt.sign(
         { id: user._id, preAuth: true },
         getJwtSecret(),
@@ -116,32 +137,22 @@ export const login = async (req, res) => {
       await user.save().catch(() => {});
     }
 
-    const token = generateToken(user._id);
+    const { sessionId, timeoutMinutes } = await createSession(user, req);
+    const token = generateToken(user._id, sessionId, timeoutMinutes);
 
     // Standard audit event: successful login (async, non-critical)
     createAuditLog({
       tenantId: user.tenantId || null,
       actor: { userId: user._id, role: user.role, email: user.email },
       action: 'AUTH_LOGIN_SUCCESS',
-      details: { method: 'password' }
+      details: { method: 'password', sessionId }
     });
 
     // Set cookie using synchronized cookie helper
-    setAuthCookie(res, token);
+    setAuthCookie(res, token, timeoutMinutes);
 
-    let institutionType = 'college';
-    let tenantName = 'Lumina Portal';
-    if (user.tenantId && mongoose.connection.readyState === 1) {
-      try {
-        const tenant = await College.findById(user.tenantId).select('name code institutionType').lean();
-        if (tenant) {
-          institutionType = tenant.institutionType || 'college';
-          tenantName = tenant.name || tenantName;
-        }
-      } catch (tenantErr) {
-        console.warn('[AuthController] Failed to lookup tenant:', tenantErr.message);
-      }
-    }
+    // Resolve server-authoritative tenant context
+    const { institutionType, tenantName } = await resolveUserTenantContext(user);
 
     res.status(200).json({
       success: true,
@@ -158,9 +169,10 @@ export const login = async (req, res) => {
         tenantId: user.tenantId,
         institutionType,
         tenantName,
-        isTwoFactorEnabled: !!user.isTwoFactorEnabled,
-        mfaEnforced: !!user.mfaEnforced,
-        mfaSetupRequired: !!user.mfaSetupRequired
+        isTwoFactorEnabled: isSuperAdminFrozen ? true : !!user.isTwoFactorEnabled,
+        mfaEnforced: isSuperAdminFrozen ? false : !!user.mfaEnforced,
+        mfaSetupRequired: isSuperAdminFrozen ? false : !!user.mfaSetupRequired,
+        superAdmin2FaFrozen: isSuperAdminFrozen
       }
     });
   } catch (error) {
@@ -168,7 +180,27 @@ export const login = async (req, res) => {
   }
 };
 
-export const logout = (req, res) => {
+export const logout = async (req, res) => {
+  try {
+    let token;
+    if (req.cookies && (req.cookies.jwt || req.cookies.token)) {
+      token = req.cookies.jwt || req.cookies.token;
+    } else if (req.headers.authorization && req.headers.authorization.startsWith('Bearer ')) {
+      token = req.headers.authorization.split(' ')[1];
+    }
+    if (token) {
+      try {
+        const decoded = jwt.verify(token, getJwtSecret());
+        if (decoded && decoded.sessionId) {
+          await revokeSession(decoded.sessionId, 'logout');
+        }
+      } catch {
+        // Token may already be expired or invalid
+      }
+    }
+  } catch (err) {
+    console.warn('[AuthController] Session revocation on logout encountered error:', err.message);
+  }
   clearAuthCookie(res);
   res.status(200).json({ success: true, message: 'Logged out successfully' });
 };
@@ -183,10 +215,21 @@ export const resetPassword = async (req, res) => {
 export const changePassword = async (req, res) => {
   const { currentPassword, newPassword, confirmPassword } = req.body;
 
-  if (!newPassword || newPassword.length < 8) {
+  if (!newPassword) {
     return res.status(400).json({
       success: false,
-      message: 'New password must be at least 8 characters long.'
+      code: 'PASSWORD_REQUIRED',
+      message: 'New password is required.'
+    });
+  }
+
+  // Dynamic password policy validation derived from MongoDB SecurityPolicy
+  const passwordValidation = await validatePasswordAgainstEffectivePolicy(newPassword);
+  if (!passwordValidation.valid) {
+    return res.status(400).json({
+      success: false,
+      code: 'PASSWORD_POLICY_VIOLATION',
+      message: passwordValidation.message
     });
   }
 
@@ -254,23 +297,13 @@ export const changePassword = async (req, res) => {
       });
     }
 
-    // Rotate session token and synchronize auth cookie
-    const token = generateToken(user._id);
-    setAuthCookie(res, token);
+    // Rotate session token, revoke all other sessions for this user, and synchronize auth cookie
+    const { sessionId, timeoutMinutes } = await createSession(user, req);
+    await revokeAllUserSessions(user._id, 'password_change', sessionId);
+    const token = generateToken(user._id, sessionId, timeoutMinutes);
+    setAuthCookie(res, token, timeoutMinutes);
 
-    let institutionType = 'college';
-    let tenantName = 'Lumina Portal';
-    if (user.tenantId && mongoose.connection.readyState === 1) {
-      try {
-        const tenant = await College.findById(user.tenantId).select('name code institutionType').lean();
-        if (tenant) {
-          institutionType = tenant.institutionType || 'college';
-          tenantName = tenant.name || tenantName;
-        }
-      } catch (tErr) {
-        console.warn('[AuthController] Failed to lookup tenant in changePassword:', tErr.message);
-      }
-    }
+    const { institutionType, tenantName } = await resolveUserTenantContext(user);
 
     return res.status(200).json({
       success: true,
@@ -308,22 +341,15 @@ export const getProfile = async (req, res) => {
   try {
     const user = await User.findById(req.user._id).select('-password');
     if (user) {
-      let institutionType = 'college';
-      let tenantName = 'Lumina Portal';
-      if (user.tenantId && mongoose.connection.readyState === 1) {
-        try {
-          const tenant = await College.findById(user.tenantId).select('name code institutionType').lean();
-          if (tenant) {
-            institutionType = tenant.institutionType || 'college';
-            tenantName = tenant.name || tenantName;
-          }
-        } catch (tErr) {
-          console.warn('[AuthController] Failed to lookup tenant in getProfile:', tErr.message);
-        }
-      }
+      const { institutionType, tenantName } = await resolveUserTenantContext(user);
       const userObj = user.toObject ? user.toObject() : { ...user._doc };
       userObj.institutionType = institutionType;
       userObj.tenantName = tenantName;
+      if (user.role === 'superadmin' && isSuperAdmin2FaFrozen()) {
+        userObj.mfaEnforced = false;
+        userObj.mfaSetupRequired = false;
+        userObj.superAdmin2FaFrozen = true;
+      }
       res.json({ success: true, user: userObj });
     } else {
       res.status(404).json({ success: false, message: 'User not found' });
@@ -423,7 +449,7 @@ export const updateProfile = async (req, res) => {
       if (typeof req.body.emergencyContact !== 'object' || req.body.emergencyContact === null || Array.isArray(req.body.emergencyContact)) {
         return res.status(400).json({ success: false, message: 'Emergency contact must be an object with name and phone.' });
       }
-      const { name, phone, relationship } = req.body.emergencyContact;
+      const { name, phone, relationship, relation } = req.body.emergencyContact;
       const sanitizedContact = {};
 
       if (name !== undefined) {
@@ -444,11 +470,13 @@ export const updateProfile = async (req, res) => {
         sanitizedContact.phone = trimmedContactPhone;
       }
 
-      if (relationship !== undefined) {
-        if (typeof relationship !== 'string') {
+      const rel = relationship !== undefined ? relationship : relation;
+      if (rel !== undefined) {
+        if (typeof rel !== 'string') {
           return res.status(400).json({ success: false, message: 'Emergency contact relationship must be a string.' });
         }
-        sanitizedContact.relationship = relationship.trim();
+        sanitizedContact.relationship = rel.trim();
+        sanitizedContact.relation = rel.trim();
       }
 
       for (const [k, v] of Object.entries(sanitizedContact)) {
@@ -488,17 +516,7 @@ export const updateProfile = async (req, res) => {
       details: { updatedFields: Object.keys(allowedUpdates) }
     });
 
-    let institutionType = 'college';
-    let tenantName = 'Lumina Portal';
-    if (updatedUser.tenantId && mongoose.connection.readyState === 1) {
-      try {
-        const tenant = await College.findById(updatedUser.tenantId).select('name code institutionType').lean();
-        if (tenant) {
-          institutionType = tenant.institutionType || 'college';
-          tenantName = tenant.name || tenantName;
-        }
-      } catch (tErr) {}
-    }
+    const { institutionType, tenantName } = await resolveUserTenantContext(updatedUser);
 
     const userObj = updatedUser.toObject ? updatedUser.toObject() : { ...updatedUser._doc };
     userObj.institutionType = institutionType;
@@ -565,7 +583,7 @@ export const setup2FA = async (req, res) => {
             secret: plainActiveSecret,
             encoding: 'base32',
             token: currentToken,
-            window: 1
+            window: 2
           });
         } catch (decErr) {
           console.error('[setup2FA] Decrypt error on active secret:', decErr.message);
@@ -715,6 +733,24 @@ export const verify2FA = async (req, res) => {
     );
     if (!user) return res.status(404).json({ success: false, message: 'User not found.' });
 
+    // SECURITY: Verify privileged identity before 2FA token issuance
+    if (isPrivilegedRole(user.role)) {
+      const identityCheck = validatePrivilegedIdentity(user.email, user.role);
+      if (!identityCheck.allowed) {
+        createAuditLog({
+          tenantId: user.tenantId || null,
+          actor: { userId: user._id, role: user.role, email: user.email },
+          action: 'AUTH_PRIVILEGED_IDENTITY_BLOCKED',
+          details: { role: user.role, reason: identityCheck.reason }
+        });
+        return res.status(403).json({
+          success: false,
+          code: 'UNAUTHORIZED_PRIVILEGED_IDENTITY',
+          message: identityCheck.reason || 'Access restricted: Privileged roles require an authorized organizational identity.'
+        });
+      }
+    }
+
     if (!user.twoFactorSecret && !user.pendingTwoFactorSecret) {
       return res.status(400).json({ success: false, message: '2FA has not been initiated for this account. Run setup first.' });
     }
@@ -726,7 +762,7 @@ export const verify2FA = async (req, res) => {
     if (user.pendingTwoFactorSecret) {
       try {
         const pendingPlain = decryptTotpSecret(user.pendingTwoFactorSecret);
-        if (speakeasy.totp.verify({ secret: pendingPlain, encoding: 'base32', token: userToken, window: 1 })) {
+        if (speakeasy.totp.verify({ secret: pendingPlain, encoding: 'base32', token: userToken, window: 2 })) {
           isValid = true;
           isPendingRotation = true;
         }
@@ -739,7 +775,7 @@ export const verify2FA = async (req, res) => {
     if (!isValid && user.twoFactorSecret) {
       try {
         const activePlain = decryptTotpSecret(user.twoFactorSecret);
-        if (speakeasy.totp.verify({ secret: activePlain, encoding: 'base32', token: userToken, window: 1 })) {
+        if (speakeasy.totp.verify({ secret: activePlain, encoding: 'base32', token: userToken, window: 2 })) {
           isValid = true;
           // Transparent in-place migration to encrypted secret if stored as legacy plaintext
           if (!isEncrypted(user.twoFactorSecret)) {
@@ -814,8 +850,9 @@ export const verify2FA = async (req, res) => {
         console.error('[AuthController] Audit failed for 2FA replacement:', auditErr.message);
       }
 
-      const finalJwt = generateToken(user._id);
-      setAuthCookie(res, finalJwt);
+      const { sessionId, timeoutMinutes } = await createSession(user, req);
+      const finalJwt = generateToken(user._id, sessionId, timeoutMinutes);
+      setAuthCookie(res, finalJwt, timeoutMinutes);
 
       return res.status(200).json({
         success: true,
@@ -869,8 +906,9 @@ export const verify2FA = async (req, res) => {
         });
       }
 
-      const finalJwt = generateToken(user._id);
-      setAuthCookie(res, finalJwt);
+      const { sessionId, timeoutMinutes } = await createSession(user, req);
+      const finalJwt = generateToken(user._id, sessionId, timeoutMinutes);
+      setAuthCookie(res, finalJwt, timeoutMinutes);
 
       return res.status(200).json({
         success: true,
@@ -903,14 +941,16 @@ export const verify2FA = async (req, res) => {
       details: { method: '2fa' }
     });
 
-    const finalJwt = generateToken(user._id);
+    const { sessionId, timeoutMinutes } = await createSession(user, req);
+    const finalJwt = generateToken(user._id, sessionId, timeoutMinutes);
 
     // Set cookie using synchronized cookie helper
-    setAuthCookie(res, finalJwt);
+    setAuthCookie(res, finalJwt, timeoutMinutes);
 
     return res.status(200).json({
       success: true,
       token: finalJwt,
+      isTwoFactorEnabled: true,
       mustChangePassword: !!user.mustChangePassword,
       user: {
         _id: user._id,
@@ -918,8 +958,12 @@ export const verify2FA = async (req, res) => {
         email: user.email,
         studentId: user.studentId,
         role: user.role,
+        batchId: user.batchId || null,
         mustChangePassword: !!user.mustChangePassword,
-        tenantId: user.tenantId
+        tenantId: user.tenantId,
+        isTwoFactorEnabled: true,
+        mfaEnforced: !!user.mfaEnforced,
+        mfaSetupRequired: false
       }
     });
   } catch (error) {

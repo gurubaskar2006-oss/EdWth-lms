@@ -10,6 +10,19 @@ import crypto from 'crypto';
 
 export const isProduction = () => process.env.NODE_ENV === 'production';
 
+/**
+ * Checks whether SuperAdmin 2FA is temporarily frozen for development / staging.
+ * STRICT SAFETY RULE: Strictly disabled (returns false) in production mode.
+ *
+ * @returns {boolean}
+ */
+export const isSuperAdmin2FaFrozen = () => {
+  if (isProduction()) {
+    return false;
+  }
+  return process.env.ENABLE_SUPERADMIN_2FA === 'false';
+};
+
 export const getJwtSecret = () => {
   const secret = process.env.JWT_SECRET;
   if (isProduction()) {
@@ -76,6 +89,11 @@ export const validateProductionEnv = () => {
     missing.push('MFA_ENCRYPTION_KEY (must be >= 32 characters or 64 hex chars; silent production fallback prohibited)');
   }
 
+  // Production safeguard: refuse startup if temporary SuperAdmin 2FA freeze is set in production
+  if (process.env.ENABLE_SUPERADMIN_2FA === 'false') {
+    missing.push('ENABLE_SUPERADMIN_2FA cannot be "false" in production (SuperAdmin 2FA bypass prohibited in production)');
+  }
+
   if (missing.length > 0) {
     const err = new Error(`FATAL: Production startup halted. Missing required environment variables: ${missing.join(', ')}`);
     console.error(`❌ [Production Configuration] ${err.message}`);
@@ -87,5 +105,6 @@ export default {
   getJwtSecret,
   getMfaEncryptionKey,
   validateProductionEnv,
-  isProduction
+  isProduction,
+  isSuperAdmin2FaFrozen
 };

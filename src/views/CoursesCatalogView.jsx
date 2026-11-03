@@ -113,14 +113,23 @@ export const CoursesCatalogView = () => {
       </div>
 
       {/* Courses Grid */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))',
-          gap: '1.5rem'
-        }}
-      >
-        {filteredCourses.map((course) => (
+      {filteredCourses.length === 0 ? (
+        <div style={{ textAlign: 'center', padding: '4rem 1rem', backgroundColor: 'var(--bg-card)', border: '1px dashed var(--border-default)', borderRadius: 'var(--radius-xl)' }}>
+          <BookOpen size={48} color="var(--text-muted)" style={{ margin: '0 auto 1rem', opacity: 0.5 }} />
+          <h3 style={{ fontSize: '1.2rem', color: 'var(--text-primary)', fontWeight: 700 }}>No courses found</h3>
+          <p style={{ color: 'var(--text-secondary)', fontSize: '0.88rem', marginTop: '0.35rem' }}>
+            {searchQuery ? `No courses matching "${searchQuery}".` : 'No courses are currently registered in the catalog.'}
+          </p>
+        </div>
+      ) : (
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))',
+            gap: '1.5rem'
+          }}
+        >
+          {filteredCourses.map((course) => (
           <div
             key={course.id}
             className="card card-interactive"
@@ -252,6 +261,7 @@ export const CoursesCatalogView = () => {
           </div>
         ))}
       </div>
+      )}
 
       {/* Course Detail Modal */}
       {selectedCourseModal && (

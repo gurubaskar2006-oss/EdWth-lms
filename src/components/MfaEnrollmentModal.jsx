@@ -25,15 +25,25 @@ export const MfaEnrollmentModal = ({ isOpen, onSuccess }) => {
   const [copiedKey, setCopiedKey] = useState(false);
   const [copiedCodes, setCopiedCodes] = useState(false);
   const [verifiedSuccess, setVerifiedSuccess] = useState(false);
+  const [isAlreadyEnrolled, setIsAlreadyEnrolled] = useState(false);
+  const [showReconfigForm, setShowReconfigForm] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [currentCode, setCurrentCode] = useState('');
+  const [reconfigLoading, setReconfigLoading] = useState(false);
+  const [reconfigError, setReconfigError] = useState('');
 
   // Fetch 2FA setup credentials when modal opens
   const fetchSetup = async () => {
     try {
       setLoading(true);
       setError('');
+      setIsAlreadyEnrolled(false);
       const res = await apiService.setup2FA();
       if (res && res.success && res.qrCode) {
         setSetupData(res);
+      } else if (res && (res.code === 'MFA_ALREADY_ENROLLED' || res.status === 403 || (res.message && res.message.includes('already enrolled')))) {
+        setIsAlreadyEnrolled(true);
+        setError(res?.message || 'Two-factor authentication is already enrolled for this account.');
       } else {
         setError(res?.message || 'Failed to initialize two-factor authentication credentials.');
       }
@@ -41,6 +51,38 @@ export const MfaEnrollmentModal = ({ isOpen, onSuccess }) => {
       setError(err?.message || 'Network error initializing two-factor credentials.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleAuthorizeReconfig = async (e) => {
+    e.preventDefault();
+    if (!currentPassword.trim()) {
+      setReconfigError('Current password is required.');
+      return;
+    }
+    if (!currentCode.trim()) {
+      setReconfigError('Active 6-digit MFA code or 8-character recovery backup code is required.');
+      return;
+    }
+    try {
+      setReconfigLoading(true);
+      setReconfigError('');
+      const res = await apiService.setup2FA({
+        currentPassword: currentPassword.trim(),
+        currentToken: currentCode.trim()
+      });
+      if (res && res.success && res.qrCode) {
+        setSetupData(res);
+        setIsAlreadyEnrolled(false);
+        setShowReconfigForm(false);
+        if (addToast) addToast('Re-authentication Verified', 'Scan the replacement QR code with your authenticator app.', 'emerald');
+      } else {
+        setReconfigError(res?.message || 'Re-authentication failed. Please check your password and MFA code.');
+      }
+    } catch (err) {
+      setReconfigError(err?.message || 'Network error authorizing reconfiguration.');
+    } finally {
+      setReconfigLoading(false);
     }
   };
 
@@ -170,10 +212,12 @@ export const MfaEnrollmentModal = ({ isOpen, onSuccess }) => {
               </span>
             </div>
             <h2 style={{ fontSize: '1.18rem', fontWeight: 800, color: 'var(--text-primary, #FFFFFF)', margin: 0, letterSpacing: '0.01em' }}>
-              Privileged MFA Enrollment Required
+              {isAlreadyEnrolled ? 'Two-Factor Authentication Active' : 'Privileged MFA Enrollment Required'}
             </h2>
             <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary, #94A3B8)', margin: '4px 0 0' }}>
-              SuperAdmin access requires mandatory two-factor authentication before unlocking administrative controls.
+              {isAlreadyEnrolled
+                ? 'Your privileged SuperAdmin account has verified multi-factor protection active.'
+                : 'SuperAdmin access requires mandatory two-factor authentication before unlocking administrative controls.'}
             </p>
           </div>
         </div>
@@ -185,6 +229,195 @@ export const MfaEnrollmentModal = ({ isOpen, onSuccess }) => {
               <RefreshCw size={28} className="spin" color="#F58212" />
               <div style={{ fontSize: '0.92rem', color: 'var(--text-secondary, #94A3B8)' }}>
                 Generating cryptographic two-factor authentication credentials...
+              </div>
+            </div>
+          ) : isAlreadyEnrolled && !setupData ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+              <div
+                style={{
+                  padding: '1.25rem',
+                  borderRadius: '12px',
+                  backgroundColor: 'rgba(5, 150, 105, 0.1)',
+                  border: '1px solid rgba(5, 150, 105, 0.3)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '0.65rem'
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                  <ShieldCheck size={20} color="#059669" />
+                  <span style={{ fontWeight: 700, fontSize: '0.95rem', color: 'var(--text-primary, #FFFFFF)' }}>
+                    Two-Factor Authentication Already Active
+                  </span>
+                </div>
+                <p style={{ margin: 0, fontSize: '0.82rem', color: 'var(--text-secondary, #94A3B8)', lineHeight: 1.5 }}>
+                  This privileged account is already protected by multi-factor authentication. To protect against session hijacking, existing cryptographic secrets cannot be viewed or overwritten without re-authentication.
+                </p>
+              </div>
+
+              {!showReconfigForm ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                  <div style={{ display: 'flex', gap: '0.75rem' }}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (logout) logout();
+                      }}
+                      className="btn-secondary"
+                      style={{
+                        flex: 1,
+                        padding: '0.75rem',
+                        borderRadius: '10px',
+                        border: '1px solid var(--border-default, #2D3748)',
+                        backgroundColor: 'var(--bg-secondary, #121217)',
+                        color: 'var(--text-primary, #FFFFFF)',
+                        fontWeight: 600,
+                        fontSize: '0.88rem',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '0.5rem'
+                      }}
+                    >
+                      <LogOut size={16} />
+                      <span>Sign In with MFA Code</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowReconfigForm(true)}
+                      className="btn-secondary"
+                      style={{
+                        flex: 1,
+                        padding: '0.75rem',
+                        borderRadius: '10px',
+                        border: '1px solid var(--border-default, #2D3748)',
+                        backgroundColor: 'var(--bg-secondary, #121217)',
+                        color: 'var(--text-primary, #FFFFFF)',
+                        fontWeight: 600,
+                        fontSize: '0.88rem',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '0.5rem'
+                      }}
+                    >
+                      <KeyRound size={16} color="#F58212" />
+                      <span>Replace Authenticator</span>
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <form onSubmit={handleAuthorizeReconfig} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                  <div style={{ fontSize: '0.85rem', fontWeight: 700, color: '#F58212' }}>
+                    Authorize MFA Reconfiguration
+                  </div>
+                  <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary, #94A3B8)', margin: 0 }}>
+                    Enter your current password and your active MFA code (or a single-use recovery backup code) to stage a replacement authenticator:
+                  </p>
+
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.76rem', fontWeight: 600, color: 'var(--text-secondary, #94A3B8)', marginBottom: '0.25rem' }}>
+                      Current Account Password
+                    </label>
+                    <input
+                      type="password"
+                      value={currentPassword}
+                      onChange={(e) => setCurrentPassword(e.target.value)}
+                      placeholder="••••••••••••"
+                      disabled={reconfigLoading}
+                      required
+                      style={{
+                        width: '100%',
+                        padding: '0.65rem 0.85rem',
+                        borderRadius: '8px',
+                        backgroundColor: 'var(--bg-secondary, #121217)',
+                        border: '1px solid var(--border-default, #334155)',
+                        color: 'var(--text-primary, #FFFFFF)',
+                        fontSize: '0.88rem'
+                      }}
+                    />
+                  </div>
+
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.76rem', fontWeight: 600, color: 'var(--text-secondary, #94A3B8)', marginBottom: '0.25rem' }}>
+                      Current 6-Digit Code or 8-Char Backup Code
+                    </label>
+                    <input
+                      type="text"
+                      maxLength={8}
+                      value={currentCode}
+                      onChange={(e) => setCurrentCode(e.target.value.replace(/[^a-zA-Z0-9]/g, ''))}
+                      placeholder="123456 or a1b2c3d4"
+                      disabled={reconfigLoading}
+                      required
+                      style={{
+                        width: '100%',
+                        padding: '0.65rem 0.85rem',
+                        borderRadius: '8px',
+                        backgroundColor: 'var(--bg-secondary, #121217)',
+                        border: '1px solid var(--border-default, #334155)',
+                        color: 'var(--text-primary, #FFFFFF)',
+                        fontSize: '0.92rem',
+                        fontFamily: 'var(--font-mono, monospace)',
+                        fontWeight: 700
+                      }}
+                    />
+                  </div>
+
+                  {reconfigError && (
+                    <div style={{ padding: '0.6rem 0.8rem', borderRadius: '8px', backgroundColor: 'rgba(239, 68, 68, 0.12)', border: '1px solid rgba(239, 68, 68, 0.3)', color: '#EF4444', fontSize: '0.78rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                      <AlertTriangle size={14} style={{ flexShrink: 0 }} />
+                      <span>{reconfigError}</span>
+                    </div>
+                  )}
+
+                  <div style={{ display: 'flex', gap: '0.75rem' }}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowReconfigForm(false);
+                        setReconfigError('');
+                      }}
+                      className="btn-secondary"
+                      style={{ flex: 1, padding: '0.65rem', fontSize: '0.82rem' }}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={reconfigLoading || !currentPassword.trim() || !currentCode.trim()}
+                      className="btn-primary"
+                      style={{
+                        flex: 2,
+                        padding: '0.65rem',
+                        fontSize: '0.85rem',
+                        fontWeight: 700,
+                        backgroundColor: '#F58212',
+                        borderColor: '#F58212',
+                        color: '#FFFFFF',
+                        cursor: reconfigLoading ? 'not-allowed' : 'pointer'
+                      }}
+                    >
+                      {reconfigLoading ? 'Authorizing...' : 'Authorize Replacement'}
+                    </button>
+                  </div>
+                </form>
+              )}
+
+              <div
+                style={{
+                  padding: '0.75rem 0.9rem',
+                  borderRadius: '8px',
+                  backgroundColor: 'rgba(255, 178, 26, 0.08)',
+                  border: '1px solid rgba(255, 178, 26, 0.2)',
+                  fontSize: '0.73rem',
+                  color: 'var(--text-secondary, #94A3B8)',
+                  lineHeight: 1.45
+                }}
+              >
+                <strong>Lost your authenticator & backup codes?</strong> MFA cannot be disabled or bypassed via self-service. Contact your institution administrator or 6th Civilians Corporation platform operations for audited manual identity recovery.
               </div>
             </div>
           ) : error && !setupData ? (
@@ -272,7 +505,7 @@ export const MfaEnrollmentModal = ({ isOpen, onSuccess }) => {
 
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', flex: 1, minWidth: 0 }}>
                     <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary, #94A3B8)', margin: 0, lineHeight: 1.45 }}>
-                      Use <strong>Google Authenticator</strong>, <strong>Microsoft Authenticator</strong>, or <strong>Authy</strong> to scan this QR code.
+                      This QR code is generated for initial enrollment or authorized replacement. Scan with <strong>Google Authenticator</strong>, <strong>Microsoft Authenticator</strong>, or <strong>Authy</strong>.
                     </p>
                     <div>
                       <div style={{ fontSize: '0.72rem', color: 'var(--text-muted, #64748B)', marginBottom: '0.25rem', fontWeight: 600 }}>
@@ -403,6 +636,9 @@ export const MfaEnrollmentModal = ({ isOpen, onSuccess }) => {
                   <label htmlFor="mfa-verify-input" style={{ fontSize: '0.9rem', fontWeight: 700, color: 'var(--text-primary, #FFFFFF)' }}>
                     Enter 6-Digit Authenticator Code
                   </label>
+                </div>
+                <div style={{ fontSize: '0.74rem', color: 'var(--text-muted, #64748B)', margin: '-0.35rem 0 0.15rem' }}>
+                  ⚠️ Codes expire every 30 seconds. Enter the current active code from your authenticator app to finalize activation.
                 </div>
 
                 <div style={{ display: 'flex', gap: '0.75rem' }}>

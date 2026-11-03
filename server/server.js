@@ -81,24 +81,20 @@ connectDB().then(async (dbInfo) => {
 
   const isProduction = process.env.NODE_ENV === 'production';
   const userCount = await User.countDocuments();
-  const withAcademicDemo = process.env.SEED_DEMO_ACADEMIC === 'true';
-  const withDemoStudents = process.env.SEED_DEMO_STUDENTS === 'true';
 
-  if (!isProduction && process.env.AUTO_SEED === 'true') {
-    console.log(`Explicit auto-seed requested (Users: ${userCount}, demo students: ${withDemoStudents ? 'ENABLED' : 'DISABLED'}, demo academic records: ${withAcademicDemo ? 'ENABLED' : 'DISABLED'})...`);
-    await runSeed({ withAcademicDemo, withDemoStudents, force: true }).catch(err => console.error('Foundational seed error:', err));
-  } else if (!isProduction && process.env.PROVISION_DEV_TEST_ACCOUNTS === 'true' && userCount === 0) {
-    console.log('ℹ️ [Dev Environment] Provisioning minimal dev test login accounts (0 demo students, 0 demo classes)...');
-    await provisionDevTestAccounts().catch(err => console.error('Dev test account provisioning error:', err.message));
-  } else if (isProduction) {
+  if (isProduction) {
     if (userCount === 0) {
       console.warn('⚠️ [Production Safeguard] User database is empty. Automatic demo seeding is strictly prohibited in production.');
       console.warn('   Initial Company Super-Admin must be provisioned via the explicit operator script: node server/scripts/provisionSuperAdmin.js');
     } else {
       console.log(`✅ [MongoDB] Production database connected. Foundational records present (${userCount} users).`);
     }
+  } else if (!isProduction && process.env.AUTO_SEED === 'true' && process.env.ALLOW_SEED === 'true') {
+    console.log(`Explicit non-production auto-seed requested (Users: ${userCount})...`);
+    await runSeed({ force: true }).catch(err => console.error('Foundational seed error:', err));
   } else {
-    console.log(`ℹ️ [Database Startup] Clean zero-demo runtime active (Users: ${userCount}). Automatic demo seeding is disabled.`);
+    // Explicit Zero-Demo Guard: NEVER automatically seed or provision fake accounts on server startup
+    console.log(`ℹ️ [Database Startup] Clean real-data-only runtime active (Users: ${userCount}). Automatic demo seeding and dev test provisioning are disabled.`);
   }
 }).catch((fatalErr) => {
   console.error('❌ [FATAL] Database initialization failed:', fatalErr.message);
@@ -209,14 +205,25 @@ app.get('/api/v1/ready', async (req, res) => {
   const isPistonReady = await isPistonHealthy();
   const queueStats = executionQueue.getStats();
 
+  const isRedisRequired = process.env.REQUIRE_REDIS === 'true';
+
+  let redisCheckStatus;
+  if (isRedisReady) {
+    redisCheckStatus = 'connected';
+  } else if (isRedisRequired) {
+    redisCheckStatus = 'disconnected';
+  } else {
+    redisCheckStatus = 'in-memory-single-node';
+  }
+
   const checks = {
     database: isDbReady ? 'connected' : 'disconnected',
-    redis: isRedisReady ? 'connected' : (process.env.NODE_ENV === 'production' ? 'disconnected' : 'in-memory-fallback'),
+    redis: redisCheckStatus,
     piston: isPistonReady ? 'available' : (process.env.NODE_ENV === 'production' ? 'unavailable' : 'dev-simulation'),
     executionQueue: queueStats
   };
 
-  const isReady = isDbReady && (process.env.NODE_ENV === 'production' ? isRedisReady : true);
+  const isReady = isDbReady && (isRedisRequired ? isRedisReady : true);
 
   res.status(isReady ? 200 : 503).json({
     status: isReady ? 'ready' : 'not-ready',
@@ -331,12 +338,15 @@ const io = new Server(httpServer, {
 setupSocketIO(io);
 app.set('io', io);
 
-// Start Server on 0.0.0.0 (Accessible across all network devices)
+// Server binding: In staging, bind strictly to loopback (127.0.0.1) for isolated local testing.
+// In other environments, allow process.env.HOST or fallback to 0.0.0.0.
+const BIND_HOST = process.env.HOST || (process.env.NODE_ENV === 'staging' ? '127.0.0.1' : '0.0.0.0');
+
 if (process.env.NODE_ENV !== 'test') {
-  httpServer.listen(PORT, '0.0.0.0', () => {
+  httpServer.listen(PORT, BIND_HOST, () => {
     console.log(`====================================================`);
-    console.log(`🚀 EdWth Academy LMS Enterprise Server running on port ${PORT}`);
-    console.log(`🏠 Local URL: http://localhost:${PORT}`);
+    console.log(`🚀 EdWth Academy LMS Enterprise Server running on port ${PORT} (${BIND_HOST})`);
+    console.log(`🏠 Local URL: http://${BIND_HOST === '0.0.0.0' ? 'localhost' : BIND_HOST}:${PORT}`);
     console.log(`🔌 Real-Time Socket.io: Active (Horizontal Redis scaling enabled)`);
     console.log(`🛡️ Isolated Code Lab: Active (Piston Sandbox Queue)`);
     console.log(`====================================================`);

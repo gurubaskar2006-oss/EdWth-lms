@@ -382,7 +382,16 @@ export const AssignmentsView = ({ onOpenSubmitModal, onOpenAssessmentModal }) =>
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-            {codingChallenges && codingChallenges.map((challenge) => (
+            {!codingChallenges || codingChallenges.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '3.5rem 1rem', backgroundColor: 'var(--bg-card)', border: '1px dashed var(--border-default)', borderRadius: 'var(--radius-lg)' }}>
+                <Code2 size={48} color="var(--text-muted)" style={{ margin: '0 auto 1rem', opacity: 0.5 }} />
+                <h3 style={{ fontSize: '1.2rem', color: 'var(--text-primary)', fontWeight: 700 }}>No coding assessments scheduled</h3>
+                <p style={{ color: 'var(--text-secondary)', fontSize: '0.88rem', marginTop: '0.35rem' }}>
+                  There are currently no coding challenges published for this cohort.
+                </p>
+              </div>
+            ) : (
+              codingChallenges.map((challenge) => (
               <div
                 key={challenge.id || challenge.day}
                 className="card card-interactive"
@@ -453,7 +462,7 @@ export const AssignmentsView = ({ onOpenSubmitModal, onOpenAssessmentModal }) =>
                   )}
                 </div>
               </div>
-            ))}
+            )))}
           </div>
         </div>
       )}

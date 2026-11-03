@@ -8,9 +8,12 @@
 
 import { isProduction } from '../config/environment.js';
 
-export const getAuthCookieOptions = () => {
+export const getAuthCookieOptions = (timeoutMinutes = null) => {
   const prod = isProduction();
   const sameSite = process.env.COOKIE_SAME_SITE || 'lax';
+  const maxAge = timeoutMinutes
+    ? Number(timeoutMinutes) * 60 * 1000
+    : 30 * 24 * 60 * 60 * 1000; // default 30 days if not dynamically provided
 
   return {
     httpOnly: true,
@@ -18,13 +21,13 @@ export const getAuthCookieOptions = () => {
     sameSite: prod ? sameSite : 'lax',
     domain: prod && process.env.COOKIE_DOMAIN ? process.env.COOKIE_DOMAIN : undefined,
     path: '/',
-    maxAge: 30 * 24 * 60 * 60 * 1000 // 30 days
+    maxAge
   };
 };
 
-export const setAuthCookie = (res, token) => {
+export const setAuthCookie = (res, token, timeoutMinutes = null) => {
   if (typeof res?.cookie === 'function') {
-    res.cookie('jwt', token, getAuthCookieOptions());
+    res.cookie('jwt', token, getAuthCookieOptions(timeoutMinutes));
   }
 };
 

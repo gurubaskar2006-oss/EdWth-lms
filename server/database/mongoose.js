@@ -1,9 +1,15 @@
 import mongoose from 'mongoose';
 import dotenv from 'dotenv';
+import { validateStagingMongoUri } from '../utils/stagingUriValidator.js';
 
 if (process.env.NODE_ENV !== 'production') {
-  dotenv.config({ path: './server/.env' });
-  dotenv.config();
+  if (process.env.ENV_FILE) {
+    // Isolated environment file: load exclusively with override; do not fall back to root .env
+    dotenv.config({ path: process.env.ENV_FILE, override: true });
+  } else {
+    dotenv.config({ path: './server/.env' });
+    dotenv.config();
+  }
 }
 
 let mongodInstance = null;
@@ -93,7 +99,18 @@ export const connectDB = async (customOptions = {}) => {
 
   // 2. STAGING / DEVELOPMENT / TEST MODE
   const isTest = process.env.NODE_ENV === 'test';
+  const isStaging = process.env.NODE_ENV === 'staging' || process.env.ENV_FILE?.includes('staging');
   const effectiveMongoURI = isTest ? process.env.TEST_MONGO_URI : mongoURI;
+
+  // STAGING ISOLATION SAFETY GUARD: Staging must strictly use local MongoDB (127.0.0.1 or localhost on port 27018)
+  if (isStaging) {
+    const validation = validateStagingMongoUri(effectiveMongoURI, 27018);
+    if (!validation.valid) {
+      const errMsg = `FATAL ISOLATION SAFETY VIOLATION: Staging mode requires local MongoDB on 127.0.0.1:27018 or localhost:27018. Rejected: ${validation.reason}`;
+      console.error(`❌ [Security Guard] ${errMsg}`);
+      throw new Error(errMsg);
+    }
+  }
 
   if (effectiveMongoURI) {
     try {
@@ -121,12 +138,22 @@ export const connectDB = async (customOptions = {}) => {
       : 'ℹ️ [MongoDB] No MONGO_URI configured in environment. Initializing local in-memory database for testing...');
   }
 
-  // 3. Fallback to MongoMemoryServer (Test / Offline Local Development Only)
+  // 3. Fallback to MongoMemoryReplSet / MongoMemoryServer (Test / Offline Local Development Only)
   try {
-    const { MongoMemoryServer } = await import('mongodb-memory-server');
-    mongodInstance = await MongoMemoryServer.create({
-      instance: { dbName: 'lumina_lms', launchTimeout: 120000 }
-    });
+    const { MongoMemoryReplSet, MongoMemoryServer } = await import('mongodb-memory-server');
+    const isReplSetNeeded =
+      process.env.USE_REPL_SET === 'true' ||
+      process.argv.some((arg) => typeof arg === 'string' && arg.includes('schoolGeneralEnrollment'));
+
+    if (isReplSetNeeded) {
+      mongodInstance = await MongoMemoryReplSet.create({
+        replSet: { count: 1, dbName: 'lumina_lms' }
+      });
+    } else {
+      mongodInstance = await MongoMemoryServer.create({
+        instance: { dbName: 'lumina_lms', launchTimeout: 120000 }
+      });
+    }
     const uri = mongodInstance.getUri();
     const conn = await mongoose.connect(uri, {
       ...customOptions

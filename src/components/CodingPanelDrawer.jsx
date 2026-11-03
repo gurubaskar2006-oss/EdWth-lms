@@ -12,7 +12,7 @@ export const CodingPanelDrawer = () => {
   const [isRunning, setIsRunning] = useState(false);
   
   const [activeMode, setActiveMode] = useState('code'); // 'code' or 'sql'
-  const [sqlCode, setSqlCode] = useState('CREATE TABLE students (id INT, name TEXT);\nINSERT INTO students VALUES (1, "Alex Vance");\nSELECT * FROM students;');
+  const [sqlCode, setSqlCode] = useState('CREATE TABLE students (id INT, name TEXT);\nINSERT INTO students VALUES (1, "Student Name");\nSELECT * FROM students;');
   const [sqlOutput, setSqlOutput] = useState(null);
 
   if (!codingPanelOpen) return null;

@@ -7,6 +7,9 @@
 import React, { useState, useEffect } from 'react';
 import { useLMS } from '../context/LMSContext';
 import { BrandLogo } from './BrandLogo';
+import { apiService } from '../services/apiService';
+import { startAuthentication } from '@simplewebauthn/browser';
+import { SuperAdminRecoveryModal } from './SuperAdminRecoveryModal';
 import {
   X,
   Lock,
@@ -20,7 +23,8 @@ import {
   HelpCircle,
   Terminal,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  KeyRound
 } from 'lucide-react';
 
 export const LoginModal = ({ isOpen, onClose }) => {
@@ -39,6 +43,10 @@ export const LoginModal = ({ isOpen, onClose }) => {
   const [preAuthToken, setPreAuthToken] = useState('');
   const [totpToken, setTotpToken] = useState('');
   const [isVerifying2FA, setIsVerifying2FA] = useState(false);
+
+  // Passkey & Recovery State
+  const [isPasskeyAuthenticating, setIsPasskeyAuthenticating] = useState(false);
+  const [showRecoveryModal, setShowRecoveryModal] = useState(false);
 
   // Developer / Demo Accounts Drawer (DEV ONLY - eliminated from production bundles)
   const [showDevAccounts, setShowDevAccounts] = useState(false);
@@ -168,6 +176,39 @@ export const LoginModal = ({ isOpen, onClose }) => {
       setErrorMessage('Verification failed. Please try again.');
     } finally {
       setIsVerifying2FA(false);
+    }
+  };
+
+  const handlePasskeySignIn = async () => {
+    try {
+      setIsPasskeyAuthenticating(true);
+      setErrorMessage('');
+
+      const optRes = await apiService.getPasskeyLoginOptions(identifier.trim() || undefined);
+      if (!optRes || !optRes.success || !optRes.options) {
+        setErrorMessage(optRes?.message || 'Passkey authentication is not available or account not found.');
+        return;
+      }
+
+      let asseResp;
+      try {
+        asseResp = await startAuthentication({ optionsJSON: optRes.options });
+      } catch (browserErr) {
+        setErrorMessage(`Passkey authentication cancelled: ${browserErr.message}`);
+        return;
+      }
+
+      const verifyRes = await apiService.verifyPasskeyLogin(asseResp);
+      if (verifyRes && verifyRes.success && verifyRes.user) {
+        handlePostLoginNavigation(verifyRes.user);
+      } else {
+        setErrorMessage(verifyRes?.message || 'Passkey verification failed.');
+      }
+    } catch (err) {
+      console.error('[Passkey Login] Error:', err);
+      setErrorMessage(err?.message || 'Error completing passkey login.');
+    } finally {
+      setIsPasskeyAuthenticating(false);
     }
   };
 
@@ -429,6 +470,36 @@ export const LoginModal = ({ isOpen, onClose }) => {
                 </>
               )}
             </button>
+
+            <div style={{ display: 'flex', alignItems: 'center', margin: '0.85rem 0 0.5rem', gap: '0.6rem' }}>
+              <div style={{ flex: 1, height: '1px', backgroundColor: 'var(--border-default)' }} />
+              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Or</span>
+              <div style={{ flex: 1, height: '1px', backgroundColor: 'var(--border-default)' }} />
+            </div>
+
+            <button
+              type="button"
+              onClick={handlePasskeySignIn}
+              disabled={isPasskeyAuthenticating || isLoading}
+              style={{
+                width: '100%',
+                padding: '0.7rem',
+                fontSize: '0.88rem',
+                fontWeight: 600,
+                borderRadius: '10px',
+                border: '1px solid var(--border-default)',
+                backgroundColor: 'var(--bg-surface)',
+                color: 'var(--text-primary)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '0.5rem',
+                cursor: isPasskeyAuthenticating ? 'wait' : 'pointer'
+              }}
+            >
+              <KeyRound size={17} style={{ color: '#2563eb' }} />
+              <span>{isPasskeyAuthenticating ? 'Waiting for Authenticator...' : 'Sign in with Passkey'}</span>
+            </button>
           </form>
         ) : (
           <form onSubmit={handle2FASubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1.2rem' }}>
@@ -448,28 +519,31 @@ export const LoginModal = ({ isOpen, onClose }) => {
               >
                 <ShieldCheck size={22} />
               </div>
-              <h3 style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--text-primary)', margin: '0 0 0.25rem' }}>
-                Two-Factor Authentication
+              <h3 style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--text-primary)', margin: '0 0 0.35rem' }}>
+                Two-Factor Verification Required
               </h3>
-              <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', margin: 0 }}>
-                Enter the 6-digit verification code from your authenticator app
+              <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', margin: '0 0 0.35rem', lineHeight: 1.45 }}>
+                Enter the current code from the <strong>authenticator app</strong> (Google Authenticator, Microsoft Authenticator, or Authy) enrolled for this account.
+              </p>
+              <p style={{ fontSize: '0.74rem', color: 'var(--text-muted)', margin: 0 }}>
+                ⚠️ Codes expire every 30 seconds and are <strong>not sent via email</strong>. If your authenticator is unavailable, you may enter an 8-character emergency recovery backup code.
               </p>
             </div>
 
             <div>
               <input
                 type="text"
-                maxLength={6}
+                maxLength={8}
                 value={totpToken}
-                onChange={(e) => setTotpToken(e.target.value.replace(/[^0-9]/g, ''))}
-                placeholder="000000"
+                onChange={(e) => setTotpToken(e.target.value.replace(/[^a-zA-Z0-9]/g, ''))}
+                placeholder="123456 or Backup Code"
                 autoFocus
                 style={{
                   width: '100%',
                   padding: '0.75rem',
-                  fontSize: '1.3rem',
+                  fontSize: '1.2rem',
                   fontWeight: 800,
-                  letterSpacing: '0.35em',
+                  letterSpacing: '0.25em',
                   textAlign: 'center',
                   borderRadius: '10px',
                   border: '1px solid var(--border-default)',
@@ -493,7 +567,7 @@ export const LoginModal = ({ isOpen, onClose }) => {
               </button>
               <button
                 type="submit"
-                disabled={isVerifying2FA || totpToken.length < 6}
+                disabled={isVerifying2FA || totpToken.trim().length < 6}
                 className="btn-primary"
                 style={{
                   flex: 2,
@@ -503,10 +577,42 @@ export const LoginModal = ({ isOpen, onClose }) => {
                   backgroundColor: '#F58212',
                   borderColor: '#F58212',
                   boxShadow: '0 4px 14px rgba(245, 130, 18, 0.3)',
-                  opacity: isVerifying2FA || totpToken.length < 6 ? 0.6 : 1
+                  opacity: isVerifying2FA || totpToken.trim().length < 6 ? 0.6 : 1
                 }}
               >
                 {isVerifying2FA ? 'Verifying...' : 'Verify Code'}
+              </button>
+            </div>
+
+            <div
+              style={{
+                marginTop: '0.25rem',
+                padding: '0.65rem 0.85rem',
+                borderRadius: '8px',
+                backgroundColor: 'rgba(255, 178, 26, 0.08)',
+                border: '1px solid rgba(255, 178, 26, 0.2)',
+                fontSize: '0.72rem',
+                color: 'var(--text-secondary)',
+                lineHeight: 1.4
+              }}
+            >
+              <strong>Lost your authenticator & backup codes?</strong> Contact your institution administrator or 6th Civilians Corporation support for audited identity recovery. Sessions cannot disable MFA without authorized verification.
+            </div>
+
+            <div style={{ textAlign: 'center', marginTop: '0.5rem' }}>
+              <button
+                type="button"
+                onClick={() => setShowRecoveryModal(true)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: '#2563eb',
+                  fontSize: '0.8rem',
+                  cursor: 'pointer',
+                  textDecoration: 'underline'
+                }}
+              >
+                SuperAdmin: Recover access via authorized security mailbox
               </button>
             </div>
           </form>
@@ -683,6 +789,12 @@ export const LoginModal = ({ isOpen, onClose }) => {
           </div>
         </div>
       )}
+
+      {/* SuperAdmin Passkey Account Recovery Modal */}
+      <SuperAdminRecoveryModal
+        isOpen={showRecoveryModal}
+        onClose={() => setShowRecoveryModal(false)}
+      />
     </div>
   );
 };

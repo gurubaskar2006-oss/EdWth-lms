@@ -52,6 +52,21 @@ export const CourseViewerView = () => {
     currentLesson = currentCourse.syllabus[0].lessons[0];
   }
 
+  if (!currentCourse) {
+    return (
+      <div style={{ textAlign: 'center', padding: '4rem 1rem', backgroundColor: 'var(--bg-card)', border: '1px dashed var(--border-default)', borderRadius: 'var(--radius-xl)' }}>
+        <BookOpen size={48} color="var(--text-muted)" style={{ margin: '0 auto 1rem', opacity: 0.5 }} />
+        <h3 style={{ fontSize: '1.2rem', color: 'var(--text-primary)', fontWeight: 700 }}>No Course Selected</h3>
+        <p style={{ color: 'var(--text-secondary)', fontSize: '0.88rem', marginTop: '0.35rem' }}>
+          Please select a course from the academic catalog to view syllabus and lessons.
+        </p>
+        <button onClick={() => setActiveTab('courses')} className="btn-primary" style={{ marginTop: '1rem' }}>
+          Browse Courses
+        </button>
+      </div>
+    );
+  }
+
   const handleLessonSelect = (lessonId) => {
     setActiveLessonId(lessonId);
   };

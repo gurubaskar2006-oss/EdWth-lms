@@ -353,7 +353,7 @@ export const AssignmentSubmitModal = ({ assignment, onClose }) => {
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                 <span style={{ color: 'var(--text-muted)' }}>Student ID:</span>
-                <span style={{ color: 'var(--text-secondary)' }}>{user?.email || 'alex.vance@mit.edu'}</span>
+                <span style={{ color: 'var(--text-secondary)' }}>{user?.studentId || user?.email || '—'}</span>
               </div>
             </div>
 

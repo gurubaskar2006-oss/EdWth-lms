@@ -51,6 +51,10 @@ const assessmentAttemptSchema = new mongoose.Schema({
     type: Number,
     default: 100
   },
+  totalMarks: {
+    type: Number,
+    default: 100
+  },
   percentage: {
     type: Number,
     default: null

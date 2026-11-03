@@ -380,6 +380,18 @@ export const SchoolDashboardView = ({ onOpenHomeworkModal }) => {
                   }))
                 : (schoolTodayClasses || []);
 
+              if (displayItems.length === 0) {
+                return (
+                  <div style={{ textAlign: 'center', padding: '2.5rem 1rem', color: 'var(--text-muted)' }}>
+                    <Clock size={32} color="var(--text-muted)" style={{ margin: '0 auto 0.5rem', opacity: 0.5 }} />
+                    <div style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--text-primary)' }}>No classes scheduled today</div>
+                    <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', margin: '0.2rem 0 0' }}>
+                      Check the timetable tab for upcoming scheduled sessions.
+                    </p>
+                  </div>
+                );
+              }
+
               return displayItems.map((item, idx) => (
                 <div
                   key={idx}
@@ -450,7 +462,16 @@ export const SchoolDashboardView = ({ onOpenHomeworkModal }) => {
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '1rem' }}>
-          {(schoolSubjects || []).map((sub) => (
+          {(!schoolSubjects || schoolSubjects.length === 0) ? (
+            <div style={{ gridColumn: '1 / -1', textAlign: 'center', padding: '2.5rem 1rem', backgroundColor: 'var(--bg-card)', border: '1px dashed var(--border-default)', borderRadius: '14px' }}>
+              <BookOpen size={36} color="var(--text-muted)" style={{ margin: '0 auto 0.5rem', opacity: 0.5 }} />
+              <div style={{ fontSize: '0.92rem', fontWeight: 600, color: 'var(--text-primary)' }}>No subjects enrolled yet</div>
+              <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', margin: '0.2rem 0 0' }}>
+                Assigned academic curriculum will appear once configured by school administration.
+              </p>
+            </div>
+          ) : (
+            schoolSubjects.map((sub) => (
             <div
               key={sub.id}
               onClick={() => setActiveTab('subjects')}
@@ -494,7 +515,7 @@ export const SchoolDashboardView = ({ onOpenHomeworkModal }) => {
                 <span>Next: {sub.nextClass}</span>
               </div>
             </div>
-          ))}
+          )))}
         </div>
       </section>
 

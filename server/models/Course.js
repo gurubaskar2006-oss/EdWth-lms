@@ -99,6 +99,6 @@ const courseSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 courseSchema.index({ tenantId: 1, id: 1 }, { unique: true });
-courseSchema.index({ tenantId: 1, code: 1 });
+courseSchema.index({ tenantId: 1, code: 1 }, { unique: true });
 
 export default mongoose.models.Course || mongoose.model('Course', courseSchema);
