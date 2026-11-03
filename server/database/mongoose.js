@@ -147,7 +147,8 @@ export const connectDB = async (customOptions = {}) => {
 
     if (isReplSetNeeded) {
       mongodInstance = await MongoMemoryReplSet.create({
-        replSet: { count: 1, dbName: 'lumina_lms' }
+        replSet: { count: 1, dbName: 'lumina_lms' },
+        instanceOpts: [{ launchTimeout: 120000 }]
       });
     } else {
       mongodInstance = await MongoMemoryServer.create({

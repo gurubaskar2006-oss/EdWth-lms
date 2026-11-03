@@ -117,11 +117,19 @@ describe('3. 2FA Backup Code Security (Hashed Storage)', () => {
 });
 
 describe('4. Tenant Schema & Model Fields', () => {
-  it('should allow institutionType in College schema with default college', () => {
-    const college = new College({
+  it('should allow institutionType in College schema with default null (unconfigured)', () => {
+    const unconfigured = new College({
       name: 'Test Engineering Academy',
       code: 'TEA-TEST',
       slug: 'tea-test'
+    });
+    expect(unconfigured.institutionType).toBeNull();
+
+    const college = new College({
+      name: 'Test Engineering College',
+      code: 'TEC-TEST',
+      slug: 'tec-test',
+      institutionType: 'college'
     });
     expect(college.institutionType).toBe('college');
   });
