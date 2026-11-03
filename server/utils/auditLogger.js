@@ -32,7 +32,7 @@ import mongoose from 'mongoose';
  * Returns { success, error, logId } so callers decide how to handle failures.
  * Supports both tenant-scoped events and legitimate company-wide/platform events (tenantId: null, isPlatform: true).
  */
-export const writeAuditLog = async ({ tenantId, actor, action, targetRecord, targetModel, details } = {}) => {
+export const writeAuditLog = async ({ tenantId, actor, action, targetRecord, targetModel, details, session } = {}) => {
   if (mongoose.connection.readyState !== 1) {
     console.error(`[AuditLog] MongoDB not connected. Lost audit event: action="${action}", actor=${actor?.userId}`);
     return { success: false, error: 'MongoDB unavailable' };
@@ -54,7 +54,7 @@ export const writeAuditLog = async ({ tenantId, actor, action, targetRecord, tar
   }
 
   try {
-    const doc = await AuditLog.create({
+    const auditData = {
       tenantId: cleanTenantId,
       isPlatform,
       actor: {
@@ -67,7 +67,10 @@ export const writeAuditLog = async ({ tenantId, actor, action, targetRecord, tar
       targetModel:  targetModel  || undefined,
       details:      details      || {},
       timestamp:    new Date()
-    });
+    };
+
+    const doc = new AuditLog(auditData);
+    await doc.save(session ? { session } : undefined);
 
     return { success: true, logId: doc._id };
   } catch (err) {

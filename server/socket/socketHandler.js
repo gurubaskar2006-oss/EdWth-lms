@@ -7,6 +7,7 @@ import Announcement from '../models/Announcement.js';
 import Doubt from '../models/Doubt.js';
 import { createSocketIORedisAdapter } from '../services/redisService.js';
 import { getJwtSecret } from '../config/environment.js';
+import { validateSession } from '../services/sessionService.js';
 import {
   startSession,
   getSession,
@@ -60,6 +61,17 @@ export const setupSocketIO = async (io) => {
       }
 
       const decoded = jwt.verify(token, getJwtSecret());
+      if (decoded && decoded.preAuth) {
+        return next(new Error('Authentication error: Incomplete MFA challenge'));
+      }
+
+      // Server-enforced session lifecycle validation for Socket.IO
+      if (decoded && decoded.sessionId) {
+        const sessionValidation = await validateSession(decoded.id, decoded.sessionId);
+        if (!sessionValidation.valid) {
+          return next(new Error(`Authentication error: ${sessionValidation.code || 'SESSION_INVALID'}`));
+        }
+      }
       
       let dbUser = null;
       if (mongoose.connection.readyState === 1 && mongoose.Types.ObjectId.isValid(decoded.id)) {
@@ -79,55 +91,20 @@ export const setupSocketIO = async (io) => {
         } catch (err) {}
       }
 
-      if (!dbUser && decoded.id && process.env.NODE_ENV !== 'production' && process.env.ENABLE_LEGACY_DATASHEET_FALLBACK === 'true') {
-        const { getStudents } = await import('../database/db.js');
-        const localStudents = getStudents();
-        const matched = localStudents.find(s => 
-          s.id === decoded.id || 
-          s.studentId?.toLowerCase() === decoded.id?.toString().toLowerCase() || 
-          s.email?.toLowerCase() === decoded.id?.toString().toLowerCase()
-        );
-        if (matched) {
-          dbUser = {
-            _id: matched.id || matched.studentId,
-            name: matched.name,
-            email: matched.email,
-            role: (matched.role || 'student').toLowerCase(),
-            studentId: matched.studentId,
-            batchId: null,
-            tenantId: null
-          };
-        }
+      if (!dbUser) {
+        return next(new Error('Authentication error: User record not found in database'));
       }
 
-      const mockFallback = socket.handshake.auth?.mockUser || {};
-
-      if (dbUser) {
-        socket.user = {
-          id: dbUser._id.toString(),
-          _id: dbUser._id.toString(),
-          name: dbUser.name,
-          email: dbUser.email,
-          role: (dbUser.role || 'student').toLowerCase(),
-          studentId: dbUser.studentId,
-          batchId: dbUser.batchId ? dbUser.batchId.toString() : null,
-          tenantId: dbUser.tenantId ? dbUser.tenantId.toString() : null
-        };
-      } else {
-        if (process.env.NODE_ENV === 'production') {
-          return next(new Error('Authentication error: User record not found in database'));
-        }
-        socket.user = {
-          id: decoded.id || mockFallback.id || `user-${socket.id}`,
-          _id: decoded.id || mockFallback._id,
-          name: mockFallback.name || 'Student',
-          email: mockFallback.email || 'student@nexus.edu',
-          role: (mockFallback.role || 'student').toLowerCase(),
-          studentId: mockFallback.studentId || decoded.id,
-          batchId: mockFallback.batchId || null,
-          tenantId: mockFallback.tenantId || null
-        };
-      }
+      socket.user = {
+        id: dbUser._id.toString(),
+        _id: dbUser._id.toString(),
+        name: dbUser.name,
+        email: dbUser.email,
+        role: (dbUser.role || 'student').toLowerCase(),
+        studentId: dbUser.studentId,
+        batchId: dbUser.batchId ? dbUser.batchId.toString() : null,
+        tenantId: dbUser.tenantId ? dbUser.tenantId.toString() : null
+      };
 
       next();
     } catch (err) {

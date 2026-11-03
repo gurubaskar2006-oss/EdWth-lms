@@ -21,6 +21,7 @@ import path from 'path';
 import fs from 'fs';
 import readline from 'readline';
 import { fileURLToPath } from 'url';
+import { validatePrivilegedIdentity } from '../config/privilegedIdentities.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -142,6 +143,12 @@ export async function provisionSuperAdmin({
   // 2. Email Validation
   if (!email || !email.includes('@') || !email.includes('.')) {
     throw new Error('Valid super-admin email address is required.');
+  }
+
+  // Enforce privileged identity policy
+  const identityCheck = validatePrivilegedIdentity(email, 'superadmin');
+  if (!identityCheck.allowed) {
+    throw new Error(`Privileged identity policy violation: ${identityCheck.reason}`);
   }
 
   // 3. Password Complexity Validation

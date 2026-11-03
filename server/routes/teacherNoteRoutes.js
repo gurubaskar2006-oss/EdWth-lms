@@ -13,7 +13,7 @@ const inMemoryTeacherNotes = new Map();
  * Retrieves instructional/advisory notes for a student, strictly isolated by tenant.
  * RBAC: Accessible only to teachers, trainers, and admins.
  */
-router.get('/:studentId', requireRole('trainer', 'teacher', 'admin'), async (req, res) => {
+router.get('/:studentId', requireRole('trainer', 'teacher', 'admin', 'superadmin'), async (req, res) => {
   const { studentId } = req.params;
   const tenantId = req.tenantId || req.user?.tenantId || 'global';
 
@@ -55,7 +55,7 @@ router.get('/:studentId', requireRole('trainer', 'teacher', 'admin'), async (req
  * Saves/updates instructional notes for a student, strictly isolated by tenant.
  * RBAC: Accessible only to teachers, trainers, and admins.
  */
-router.put('/:studentId', requireRole('trainer', 'teacher', 'admin'), async (req, res) => {
+router.put('/:studentId', requireRole('trainer', 'teacher', 'admin', 'superadmin'), async (req, res) => {
   const { studentId } = req.params;
   const { content = '' } = req.body;
   const tenantId = req.tenantId || req.user?.tenantId || 'global';

@@ -164,7 +164,7 @@ export const GlobalNotesDrawer = () => {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `nexus_study_notes_${new Date().toISOString().split('T')[0]}.md`;
+    link.download = `edwth_study_notes_${new Date().toISOString().split('T')[0]}.md`;
     link.click();
     URL.revokeObjectURL(url);
     addToast('Notes Exported', 'All study notes downloaded as Markdown.', 'emerald');

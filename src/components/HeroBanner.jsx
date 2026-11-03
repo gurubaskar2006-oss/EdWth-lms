@@ -101,7 +101,7 @@ export const HeroBanner = () => {
                   border: '1px solid var(--border-default)'
                 }}
               >
-                {user.major || 'Computer Science & AI'} · Fall 2026
+                {user?.major || 'General Academic'}
               </span>
             </div>
 
@@ -116,7 +116,7 @@ export const HeroBanner = () => {
                 lineHeight: 1.2
               }}
             >
-              {greeting}, {user.name.split(' ')[0]}
+              {greeting}, {user?.name ? user.name.split(' ')[0] : 'Scholar'}
             </h1>
 
             <p
@@ -146,7 +146,7 @@ export const HeroBanner = () => {
                 }}
               >
                 <ShieldCheck size={14} color="var(--accent-primary)" />
-                <span>Student ID: <strong style={{ color: 'var(--text-primary)' }}>{user.studentId || 'NX-2026-4401'}</strong></span>
+                <span>Student ID: <strong style={{ color: 'var(--text-primary)' }}>{user?.studentId || '—'}</strong></span>
               </div>
 
               <div
@@ -163,7 +163,7 @@ export const HeroBanner = () => {
                 }}
               >
                 <Award size={14} color="var(--accent-indigo)" />
-                <span>Cumulative GPA: <strong style={{ color: 'var(--text-primary)' }}>{user.stats?.gpa || user.gpa || '3.92'}</strong></span>
+                <span>Cumulative GPA: <strong style={{ color: 'var(--text-primary)' }}>{user?.stats?.gpa || user?.gpa || '—'}</strong></span>
               </div>
 
               <button
@@ -268,30 +268,30 @@ export const HeroBanner = () => {
                   type="button"
                   onClick={() =>
                     handlePresetSelect(
-                      'Nexus Institute of Technology',
-                      'Nexus Portal | EdWth LMS',
-                      'Empowering World-Class AI Engineers & Scholars'
+                      'Metropolitan Polytechnic',
+                      'Metropolitan Portal | EdWth LMS',
+                      'Technical Innovation & Higher Applied Engineering'
                     )
                   }
                   className="btn-secondary"
                   style={{ fontSize: '0.75rem', padding: '0.35rem 0.65rem' }}
                 >
-                  🏛️ Nexus Institute
+                  🏛️ Metropolitan Polytechnic
                 </button>
 
                 <button
                   type="button"
                   onClick={() =>
                     handlePresetSelect(
-                      'Oakridge High School',
-                      'Oakridge Portal | EdWth LMS',
+                      'Horizon STEM Academy',
+                      'Horizon Portal | EdWth LMS',
                       'Excellence in STEM & Foundational Sciences'
                     )
                   }
                   className="btn-secondary"
                   style={{ fontSize: '0.75rem', padding: '0.35rem 0.65rem' }}
                 >
-                  🌲 Oakridge High School
+                  🏫 Horizon STEM Academy
                 </button>
               </div>
             </div>

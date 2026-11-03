@@ -390,6 +390,177 @@ const ProvisionTrainerModal = ({ isOpen, onClose, onCreated, terms }) => {
 };
 
 // ─── Admin Dashboard ──────────────────────────────────────────────────────────
+// ─── Edit Trainer Modal ───────────────────────────────────────────────────────
+const EditTrainerModal = ({ isOpen, onClose, trainer, onUpdated, terms }) => {
+  const [name, setName] = useState('');
+  const [phone, setPhone] = useState('');
+  const [department, setDepartment] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (trainer) {
+      setName(trainer.name || '');
+      setPhone(trainer.phone || '');
+      setDepartment(trainer.department || '');
+      setError('');
+    }
+  }, [trainer, isOpen]);
+
+  if (!isOpen || !trainer) return null;
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!name.trim()) {
+      setError('Name is required');
+      return;
+    }
+    setIsSubmitting(true);
+    setError('');
+
+    try {
+      const res = await apiService.updateAdminTrainer(trainer._id, {
+        name: name.trim(),
+        phone: phone.trim(),
+        department: department.trim()
+      });
+      if (res && res.success) {
+        onUpdated();
+        onClose();
+      } else {
+        setError(res?.message || 'Failed to update trainer');
+      }
+    } catch (err) {
+      setError(err.message || 'An error occurred while updating');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.6)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}>
+      <div style={{ backgroundColor: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: '12px', maxWidth: '480px', width: '100%', padding: '1.5rem' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
+          <h3 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 800, color: 'var(--text-primary)' }}>Edit {terms?.educatorLabel || 'Trainer'}</h3>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '1.2rem', color: 'var(--text-muted)' }}>×</button>
+        </div>
+        {error && <div style={{ color: '#EF4444', marginBottom: '1rem', fontSize: '0.85rem' }}>{error}</div>}
+        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          <div>
+            <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.35rem' }}>Full Name</label>
+            <input type="text" value={name} onChange={(e) => setName(e.target.value)} required style={{ width: '100%', fontSize: '0.86rem' }} />
+          </div>
+          <div>
+            <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.35rem' }}>Department / Faculty</label>
+            <input type="text" value={department} onChange={(e) => setDepartment(e.target.value)} style={{ width: '100%', fontSize: '0.86rem' }} />
+          </div>
+          <div>
+            <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.35rem' }}>Contact Phone</label>
+            <input type="text" value={phone} onChange={(e) => setPhone(e.target.value)} style={{ width: '100%', fontSize: '0.86rem' }} />
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '1rem' }}>
+            <button type="button" onClick={onClose} className="btn-secondary" disabled={isSubmitting}>Cancel</button>
+            <button type="submit" className="btn-primary" disabled={isSubmitting} style={{ backgroundColor: '#6366F1', borderColor: '#6366F1' }}>
+              {isSubmitting ? 'Saving...' : 'Save Changes'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+};
+
+// ─── Reassign Trainer Modal ───────────────────────────────────────────────────
+const ReassignTrainerModal = ({ isOpen, onClose, trainer, trainers, onReassigned, terms }) => {
+  const [replacementTrainerId, setReplacementTrainerId] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState('');
+
+  const eligibleReplacements = (trainers || []).filter(
+    (t) => t._id !== trainer?._id && t.accountStatus !== 'Inactive' && !t.soft_deleted
+  );
+
+  useEffect(() => {
+    if (eligibleReplacements.length > 0) {
+      setReplacementTrainerId(eligibleReplacements[0]._id);
+    } else {
+      setReplacementTrainerId('');
+    }
+    setError('');
+  }, [trainer, isOpen]);
+
+  if (!isOpen || !trainer) return null;
+
+  const handleReassign = async (e) => {
+    e.preventDefault();
+    if (!replacementTrainerId) {
+      setError('Please select an active replacement educator.');
+      return;
+    }
+    setIsSubmitting(true);
+    setError('');
+
+    try {
+      const res = await apiService.reassignAdminTrainer(trainer._id, {
+        replacementTrainerId
+      });
+      if (res && res.success) {
+        onReassigned(res.message);
+        onClose();
+      } else {
+        setError(res?.message || 'Failed to reassign cohorts.');
+      }
+    } catch (err) {
+      setError(err.message || 'An error occurred during reassignment.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.6)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}>
+      <div style={{ backgroundColor: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: '12px', maxWidth: '480px', width: '100%', padding: '1.5rem' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
+          <h3 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 800, color: 'var(--text-primary)' }}>Reassign {terms?.groupLabel || 'Cohort'}</h3>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '1.2rem', color: 'var(--text-muted)' }}>×</button>
+        </div>
+        <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '1rem' }}>
+          Reassign cohorts and enrolled students from <strong>{trainer.name}</strong> to another active instructor.
+        </p>
+        {error && <div style={{ color: '#EF4444', marginBottom: '1rem', fontSize: '0.85rem' }}>{error}</div>}
+        {eligibleReplacements.length === 0 ? (
+          <p style={{ color: '#D97706', fontSize: '0.85rem' }}>No other active faculty members available to take over this assignment.</p>
+        ) : (
+          <form onSubmit={handleReassign} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+            <div>
+              <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.35rem' }}>
+                Select Replacement {terms?.educatorLabel || 'Educator'}
+              </label>
+              <select
+                value={replacementTrainerId}
+                onChange={(e) => setReplacementTrainerId(e.target.value)}
+                style={{ width: '100%', fontSize: '0.86rem' }}
+              >
+                {eligibleReplacements.map((t) => (
+                  <option key={t._id} value={t._id}>
+                    {t.name} ({t.email}) - {t.department || 'Faculty'}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '1rem' }}>
+              <button type="button" onClick={onClose} className="btn-secondary" disabled={isSubmitting}>Cancel</button>
+              <button type="submit" className="btn-primary" disabled={isSubmitting} style={{ backgroundColor: '#6366F1', borderColor: '#6366F1' }}>
+                {isSubmitting ? 'Reassigning...' : 'Confirm Reassignment'}
+              </button>
+            </div>
+          </form>
+        )}
+      </div>
+    </div>
+  );
+};
+
 const AdminDashboard = ({ onOpenCreateBatch, onOpenProvisionTrainer, onNavigateTab }) => {
   const { terms, user } = useLMS();
   const [overview, setOverview] = useState(null);
@@ -860,10 +1031,12 @@ const CollegeManagementView = ({ onOpenCreateBatch }) => {
 
 // ─── Trainer Provisioning View ────────────────────────────────────────────────
 const TrainerProvisioningView = ({ onOpenProvisionTrainer }) => {
-  const { terms } = useLMS();
+  const { terms, addToast } = useLMS();
   const [trainers, setTrainers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
+  const [editingTrainer, setEditingTrainer] = useState(null);
+  const [reassigningTrainer, setReassigningTrainer] = useState(null);
 
   const fetchTrainers = () => {
     setLoading(true);
@@ -874,6 +1047,23 @@ const TrainerProvisioningView = ({ onOpenProvisionTrainer }) => {
   };
 
   useEffect(() => { fetchTrainers(); }, []);
+
+  const handleDeactivate = async (t) => {
+    if (!window.confirm(`Are you sure you want to deactivate ${t.name}? Active sessions will be revoked and access disabled. Enrolled students and historical records remain intact.`)) {
+      return;
+    }
+    try {
+      const res = await apiService.deleteAdminTrainer(t._id);
+      if (res && res.success) {
+        addToast('Trainer Deactivated', `${t.name} has been deactivated.`, 'emerald');
+        fetchTrainers();
+      } else {
+        addToast('Deactivation Failed', res?.message || 'Failed to deactivate trainer.', 'amber');
+      }
+    } catch (err) {
+      addToast('Error', err.message || 'Error deactivating trainer', 'red');
+    }
+  };
 
   const filteredTrainers = trainers.filter(t =>
     (t.name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -917,7 +1107,7 @@ const TrainerProvisioningView = ({ onOpenProvisionTrainer }) => {
         </h3>
 
         {loading ? (
-          <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Loading faculty roster…</p>
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Loading faculty roster...</p>
         ) : filteredTrainers.length === 0 ? (
           <div style={{ padding: '3rem', textAlign: 'center', border: '2px dashed var(--border-default)', borderRadius: '12px' }}>
             <UserCheck size={32} color="var(--text-muted)" style={{ marginBottom: '0.75rem' }} />
@@ -963,10 +1153,16 @@ const TrainerProvisioningView = ({ onOpenProvisionTrainer }) => {
                   </div>
                   <div>
                     <div style={{ fontWeight: 700, fontSize: '0.92rem', color: 'var(--text-primary)' }}>{t.name}</div>
-                    <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '2px' }}>
+                    <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '2px', flexWrap: 'wrap' }}>
                       <span>{t.email}</span>
                       <span>•</span>
                       <span>{t.department || 'Faculty'}</span>
+                      {t.batchName && (
+                        <>
+                          <span>•</span>
+                          <span style={{ color: '#6366F1', fontWeight: 600 }}>Cohort: {t.batchName}</span>
+                        </>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -981,15 +1177,88 @@ const TrainerProvisioningView = ({ onOpenProvisionTrainer }) => {
                     color: '#6366F1',
                     border: '1px solid rgba(99, 102, 241, 0.25)'
                   }}>
-                    {terms?.educatorLabel?.toUpperCase() || 'EDUCATOR'}
+                    {terms?.educatorLabel?.toUpperCase() || (t.role === 'teacher' ? 'TEACHER' : 'TRAINER')}
                   </span>
-                  <span style={{ fontSize: '0.78rem', color: '#059669', fontWeight: 600 }}>Active</span>
+                  <span style={{ fontSize: '0.78rem', color: t.accountStatus === 'Inactive' || t.soft_deleted ? '#EF4444' : '#059669', fontWeight: 600 }}>
+                    {t.accountStatus === 'Inactive' || t.soft_deleted ? 'Inactive' : 'Active'}
+                  </span>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginLeft: '0.5rem' }}>
+                    <button
+                      onClick={() => setEditingTrainer(t)}
+                      style={{
+                        padding: '0.3rem 0.6rem',
+                        fontSize: '0.75rem',
+                        fontWeight: 600,
+                        backgroundColor: 'var(--bg-card)',
+                        border: '1px solid var(--border-default)',
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                        color: 'var(--text-primary)'
+                      }}
+                    >
+                      Edit
+                    </button>
+                    <button
+                      onClick={() => setReassigningTrainer(t)}
+                      style={{
+                        padding: '0.3rem 0.6rem',
+                        fontSize: '0.75rem',
+                        fontWeight: 600,
+                        backgroundColor: 'rgba(99, 102, 241, 0.1)',
+                        border: '1px solid rgba(99, 102, 241, 0.3)',
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                        color: '#6366F1'
+                      }}
+                    >
+                      Reassign
+                    </button>
+                    <button
+                      onClick={() => handleDeactivate(t)}
+                      style={{
+                        padding: '0.3rem 0.6rem',
+                        fontSize: '0.75rem',
+                        fontWeight: 600,
+                        backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                        border: '1px solid rgba(239, 68, 68, 0.3)',
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                        color: '#EF4444'
+                      }}
+                    >
+                      Deactivate
+                    </button>
+                  </div>
                 </div>
               </div>
             ))}
           </div>
         )}
       </div>
+
+      <EditTrainerModal
+        isOpen={Boolean(editingTrainer)}
+        trainer={editingTrainer}
+        onClose={() => setEditingTrainer(null)}
+        onUpdated={() => {
+          fetchTrainers();
+          addToast('Trainer Updated', 'Trainer details have been updated.', 'emerald');
+        }}
+        terms={terms}
+      />
+
+      <ReassignTrainerModal
+        isOpen={Boolean(reassigningTrainer)}
+        trainer={reassigningTrainer}
+        trainers={trainers}
+        onClose={() => setReassigningTrainer(null)}
+        onReassigned={(msg) => {
+          fetchTrainers();
+          addToast('Reassigned Successfully', msg || 'Cohort reassigned.', 'emerald');
+        }}
+        terms={terms}
+      />
     </div>
   );
 };

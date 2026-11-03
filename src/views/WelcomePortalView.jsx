@@ -37,9 +37,9 @@ export const WelcomePortalView = () => {
   } = useLMS();
 
   const [editPortalModalOpen, setEditPortalModalOpen] = useState(false);
-  const [tempCompanyName, setTempCompanyName] = useState(portalConfig?.companyName || 'Nexus Institute of Technology');
-  const [tempPortalName, setTempPortalName] = useState(portalConfig?.portalName || 'Nexus Enterprise Student Learning Portal');
-  const [tempMotto, setTempMotto] = useState(portalConfig?.motto || 'Empowering World-Class AI Engineers & Scholars');
+  const [tempCompanyName, setTempCompanyName] = useState(portalConfig?.companyName || 'EdWth Academy');
+  const [tempPortalName, setTempPortalName] = useState(portalConfig?.portalName || 'EdWth Academy Learning Portal');
+  const [tempMotto, setTempMotto] = useState(portalConfig?.motto || 'Empowering Every Learner');
 
   // Dynamic Time Greeting
   const currentHour = new Date().getHours();
@@ -432,14 +432,14 @@ export const WelcomePortalView = () => {
                 <button
                   type="button"
                   onClick={() => {
-                    setTempCompanyName('Nexus Institute of Technology');
-                    setTempPortalName('Nexus Enterprise Student Learning Portal');
-                    setTempMotto('Empowering World-Class AI Engineers & Scholars');
+                    setTempCompanyName('EdWth Academy');
+                    setTempPortalName('EdWth Enterprise Student Learning Portal');
+                    setTempMotto('Empowering Every Learner & Scholar');
                   }}
                   className="btn-secondary"
                   style={{ fontSize: '0.75rem', padding: '0.35rem 0.65rem' }}
                 >
-                  🏛️ Nexus Institute
+                  🏛️ EdWth Academy
                 </button>
 
                 <button

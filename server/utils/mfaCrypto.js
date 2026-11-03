@@ -102,9 +102,111 @@ export const decryptTotpSecret = (encryptedOrPlaintext) => {
   }
 };
 
+/**
+ * Safely diagnose the state of an encrypted TOTP secret without revealing keys or plaintext.
+ * Distinguishes missing configuration, malformed ciphertext, invalid lengths, and auth-tag mismatch.
+ *
+ * @param {string} encryptedOrPlaintext
+ * @returns {{ status: string, isEncrypted: boolean, message: string }}
+ */
+export const diagnoseMfaEncryption = (encryptedOrPlaintext) => {
+  if (!encryptedOrPlaintext || typeof encryptedOrPlaintext !== 'string') {
+    return {
+      status: 'EMPTY_OR_INVALID',
+      isEncrypted: false,
+      message: 'Secret is null, empty, or not a string.'
+    };
+  }
+
+  if (!isEncrypted(encryptedOrPlaintext)) {
+    return {
+      status: 'LEGACY_PLAINTEXT',
+      isEncrypted: false,
+      message: 'Secret is stored in legacy unencrypted base32 format.'
+    };
+  }
+
+  const withoutPrefix = encryptedOrPlaintext.slice(PREFIX.length);
+  const parts = withoutPrefix.split(':');
+  if (parts.length !== 3) {
+    return {
+      status: 'MALFORMED_STRUCTURE',
+      isEncrypted: true,
+      message: 'Encrypted secret does not follow the enc:v1:<iv>:<tag>:<ciphertext> schema.'
+    };
+  }
+
+  const [ivHex, tagHex, cipherHex] = parts;
+  if (!/^[0-9a-fA-F]+$/.test(ivHex) || !/^[0-9a-fA-F]+$/.test(tagHex) || !/^[0-9a-fA-F]+$/.test(cipherHex)) {
+    return {
+      status: 'INVALID_HEX_ENCODING',
+      isEncrypted: true,
+      message: 'Cryptographic components contain invalid non-hexadecimal characters.'
+    };
+  }
+
+  const iv = Buffer.from(ivHex, 'hex');
+  const authTag = Buffer.from(tagHex, 'hex');
+
+  if (iv.length !== 12) {
+    return {
+      status: 'INVALID_IV_LENGTH',
+      isEncrypted: true,
+      message: `Invalid IV length (${iv.length} bytes; expected 12 bytes / 96-bit).`
+    };
+  }
+
+  if (authTag.length !== 16) {
+    return {
+      status: 'INVALID_AUTH_TAG_LENGTH',
+      isEncrypted: true,
+      message: `Invalid auth tag length (${authTag.length} bytes; expected 16 bytes / 128-bit).`
+    };
+  }
+
+  let key;
+  try {
+    key = getMfaEncryptionKey();
+  } catch (keyErr) {
+    return {
+      status: 'MISSING_CONFIGURATION',
+      isEncrypted: true,
+      message: 'Encryption key configuration is missing or invalid: ' + keyErr.message
+    };
+  }
+
+  try {
+    const decipher = crypto.createDecipheriv(CIPHER_ALGO, key, iv);
+    decipher.setAuthTag(authTag);
+    let decrypted = decipher.update(cipherHex, 'hex', 'utf8');
+    decrypted += decipher.final('utf8');
+
+    if (decrypted && decrypted.length >= 16) {
+      return {
+        status: 'DECRYPTABLE_HEALTHY',
+        isEncrypted: true,
+        message: 'Secret is correctly encrypted and decryptable with active environment key.'
+      };
+    } else {
+      return {
+        status: 'DECRYPTED_PAYLOAD_UNEXPECTED',
+        isEncrypted: true,
+        message: 'Decryption succeeded but resulting payload length is below standard base32 seed.'
+      };
+    }
+  } catch (cipherErr) {
+    return {
+      status: 'AUTH_TAG_OR_KEY_MISMATCH',
+      isEncrypted: true,
+      message: 'AES-256-GCM authentication tag mismatch or encryption key mismatch.'
+    };
+  }
+};
+
 export default {
   getMfaEncryptionKey,
   isEncrypted,
   encryptTotpSecret,
-  decryptTotpSecret
+  decryptTotpSecret,
+  diagnoseMfaEncryption
 };

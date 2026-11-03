@@ -479,10 +479,13 @@ export const UnauthenticatedView = ({ portalName }) => {
                 <ShieldCheck size={24} />
               </div>
               <h2 style={{ fontSize: '1.2rem', fontWeight: 700, color: 'var(--text-primary)', margin: '0 0 0.35rem 0' }}>
-                Two-Factor Verification
+                Two-Factor Verification Required
               </h2>
-              <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', margin: 0 }}>
-                Enter the 6-digit verification code from your authenticator app.
+              <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', margin: '0 0 0.35rem', lineHeight: 1.45 }}>
+                Enter the current code from the <strong>authenticator app</strong> (Google Authenticator, Microsoft Authenticator, or Authy) enrolled for this account.
+              </p>
+              <p style={{ fontSize: '0.74rem', color: 'var(--text-muted)', margin: 0 }}>
+                ⚠️ Codes expire every 30 seconds and are <strong>not sent via email</strong>. If your authenticator is unavailable, you may enter an 8-character emergency recovery backup code.
               </p>
             </div>
 
@@ -518,7 +521,7 @@ export const UnauthenticatedView = ({ portalName }) => {
                   textAlign: 'center'
                 }}
               >
-                Verification Code
+                Authenticator Code or Recovery Backup Code
               </label>
               <input
                 id="totp-code"
@@ -526,15 +529,15 @@ export const UnauthenticatedView = ({ portalName }) => {
                 maxLength="8"
                 autoFocus
                 value={totpToken}
-                onChange={(e) => setTotpToken(e.target.value.replace(/\s+/g, ''))}
-                placeholder="123456"
+                onChange={(e) => setTotpToken(e.target.value.replace(/[^a-zA-Z0-9]/g, ''))}
+                placeholder="123456 or Backup Code"
                 style={{
                   width: '100%',
                   padding: '0.85rem',
-                  fontSize: '1.4rem',
+                  fontSize: '1.3rem',
                   fontWeight: 700,
                   textAlign: 'center',
-                  letterSpacing: '0.3em',
+                  letterSpacing: '0.25em',
                   fontFamily: 'var(--font-mono)',
                   borderRadius: 'var(--radius-md)',
                   border: '1px solid var(--border-default)',
@@ -547,7 +550,7 @@ export const UnauthenticatedView = ({ portalName }) => {
 
             <button
               type="submit"
-              disabled={isVerifying2FA}
+              disabled={isVerifying2FA || totpToken.trim().length < 6}
               className="btn-primary"
               style={{
                 width: '100%',
@@ -561,7 +564,8 @@ export const UnauthenticatedView = ({ portalName }) => {
                 alignItems: 'center',
                 justifyContent: 'center',
                 gap: '0.5rem',
-                cursor: isVerifying2FA ? 'not-allowed' : 'pointer'
+                cursor: isVerifying2FA || totpToken.trim().length < 6 ? 'not-allowed' : 'pointer',
+                opacity: isVerifying2FA || totpToken.trim().length < 6 ? 0.6 : 1
               }}
             >
               {isVerifying2FA ? 'Verifying...' : 'Confirm & Continue'}
@@ -578,11 +582,29 @@ export const UnauthenticatedView = ({ portalName }) => {
                 fontSize: '0.8rem',
                 color: 'var(--text-secondary)',
                 fontWeight: 500,
-                textAlign: 'center'
+                textAlign: 'center',
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer'
               }}
             >
               ← Back to login
             </button>
+
+            <div
+              style={{
+                marginTop: '0.25rem',
+                padding: '0.65rem 0.85rem',
+                borderRadius: '8px',
+                backgroundColor: 'rgba(255, 178, 26, 0.08)',
+                border: '1px solid rgba(255, 178, 26, 0.2)',
+                fontSize: '0.72rem',
+                color: 'var(--text-secondary)',
+                lineHeight: 1.4
+              }}
+            >
+              <strong>Lost your authenticator & backup codes?</strong> Contact your institution administrator or 6th Civilians Corporation support for audited identity recovery. Sessions cannot disable MFA without authorized verification.
+            </div>
           </form>
         )}
 

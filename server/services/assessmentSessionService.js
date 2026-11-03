@@ -690,6 +690,7 @@ export const finalizeAssessmentSubmission = async ({
             integrityStatus,
             score: targetScore,
             maxScore: totalMarks,
+            totalMarks: totalMarks,
             percentage: targetPercentage,
             answers: sanitizedAnswers,
             questionResults: serverQuestionResults
@@ -751,6 +752,7 @@ export const finalizeAssessmentSubmission = async ({
           integrityStatus,
           score: targetScore,
           maxScore: totalMarks,
+          totalMarks: totalMarks,
           percentage: targetPercentage,
           answers: sanitizedAnswers,
           questionResults: serverQuestionResults

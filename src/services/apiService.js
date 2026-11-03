@@ -4,6 +4,9 @@ const API_BASE_URL = `${BACKEND_URL}/api/v1`;
 let sessionExpiredDebounce = 0;
 
 let activeSessionToken = null;
+let isSessionStaleFlag = false;
+let activeUserFingerprint = null;
+const activeAbortControllers = new Set();
 
 export const setActiveSessionToken = (token) => {
   activeSessionToken = token || null;
@@ -11,21 +14,58 @@ export const setActiveSessionToken = (token) => {
 
 export const getActiveSessionToken = () => activeSessionToken;
 
+export const isSessionStale = () => isSessionStaleFlag;
+
+export const markSessionStale = (stale = true, reason = 'Cross-tab identity change') => {
+  isSessionStaleFlag = Boolean(stale);
+  if (isSessionStaleFlag) {
+    // Abort all cancellable in-flight protected requests safely
+    for (const controller of activeAbortControllers) {
+      try {
+        controller.abort('SESSION_STALE_IDENTITY_MISMATCH');
+      } catch {}
+    }
+    activeAbortControllers.clear();
+    // Drop active in-memory session token to halt further request dispatch
+    activeSessionToken = null;
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('lms_session_stale', { detail: { reason } }));
+    }
+  }
+};
+
+export const setActiveUserFingerprint = (fingerprint) => {
+  activeUserFingerprint = fingerprint || null;
+};
+
+export const getActiveUserFingerprint = () => activeUserFingerprint;
+
 /**
- * Universal token resolver: checks in-memory activeSessionToken, lumina_auth_token, token, jwt, and sessionStorage.
+ * Universal token resolver: reads exclusively from in-memory activeSessionToken or canonical lumina_auth_token.
+ * Purges legacy token keys (token, jwt) from browser storage to ensure single-source authority.
  */
 export const getAuthToken = () => {
   try {
-    if (activeSessionToken) return activeSessionToken;
-    if (typeof window === 'undefined') return null;
-    return (
-      localStorage.getItem('lumina_auth_token') ||
-      localStorage.getItem('token') ||
-      localStorage.getItem('jwt') ||
-      sessionStorage.getItem('lumina_auth_token') ||
-      sessionStorage.getItem('token') ||
-      null
-    );
+    if (typeof window === 'undefined') return activeSessionToken || null;
+
+    // Purge legacy non-canonical keys if encountered
+    try {
+      if (localStorage.getItem('token')) localStorage.removeItem('token');
+      if (localStorage.getItem('jwt')) localStorage.removeItem('jwt');
+      if (sessionStorage.getItem('token')) sessionStorage.removeItem('token');
+      if (sessionStorage.getItem('jwt')) sessionStorage.removeItem('jwt');
+    } catch {}
+
+    if (activeSessionToken && typeof activeSessionToken === 'string' && activeSessionToken !== 'null' && activeSessionToken !== 'undefined') {
+      return activeSessionToken;
+    }
+
+    const canonicalToken = localStorage.getItem('lumina_auth_token');
+    if (canonicalToken && typeof canonicalToken === 'string' && canonicalToken !== 'null' && canonicalToken !== 'undefined') {
+      return canonicalToken;
+    }
+
+    return null;
   } catch {
     return activeSessionToken || null;
   }
@@ -34,12 +74,27 @@ export const getAuthToken = () => {
 export const setAuthToken = (token) => {
   try {
     setActiveSessionToken(token);
+    if (token && typeof token === 'string' && token !== 'null' && token !== 'undefined') {
+      // Re-arming session on deliberate new token acquisition
+      isSessionStaleFlag = false;
+    } else {
+      activeUserFingerprint = null;
+    }
+
     if (typeof window === 'undefined') return;
-    if (token) {
+    if (token && typeof token === 'string' && token !== 'null' && token !== 'undefined') {
       localStorage.setItem('lumina_auth_token', token);
     } else {
       localStorage.removeItem('lumina_auth_token');
     }
+    // Clean up any legacy or ambient session keys
+    try {
+      localStorage.removeItem('token');
+      localStorage.removeItem('jwt');
+      sessionStorage.removeItem('token');
+      sessionStorage.removeItem('jwt');
+      sessionStorage.removeItem('lumina_auth_token');
+    } catch {}
   } catch {}
 };
 
@@ -62,21 +117,97 @@ export const apiService = {
   // Use credentials to send httpOnly cookies automatically and include Bearer token
   _fetch: async (url, options = {}) => {
     const targetUrl = normalizeApiUrl(url);
+
+    // Auth resolution, recovery, and login endpoints must bypass staleness checks
+    const isAuthRevalidationUrl = 
+      targetUrl.includes('/auth/login') ||
+      targetUrl.includes('/auth/passkeys/login') ||
+      targetUrl.includes('/auth/2fa/verify') ||
+      targetUrl.includes('/auth/recovery') ||
+      targetUrl.includes('/auth/logout');
+
+    // DISPATCH PROTECTION: Prevent stale context from dispatching protected API requests
+    if (isSessionStaleFlag && !isAuthRevalidationUrl) {
+      console.warn(`[apiService] Blocked protected request to ${targetUrl}: session context is marked stale.`);
+      const stalePayload = {
+        success: false,
+        code: 'SESSION_STALE_IDENTITY_MISMATCH',
+        message: 'Authentication session context is stale due to identity change in another tab. Re-authentication required.'
+      };
+      if (typeof Response !== 'undefined') {
+        return new Response(JSON.stringify(stalePayload), {
+          status: 403,
+          statusText: 'Forbidden: Session Stale',
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+      return {
+        ok: false,
+        status: 403,
+        statusText: 'Forbidden: Session Stale',
+        json: async () => stalePayload,
+        text: async () => JSON.stringify(stalePayload),
+        clone: function() { return this; }
+      };
+    }
+
     const token = getAuthToken();
     const authHeader = token ? { 'Authorization': `Bearer ${token}` } : {};
 
     const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData;
     const defaultHeaders = isFormData ? {} : { 'Content-Type': 'application/json' };
 
-    const res = await fetch(targetUrl, {
-      ...options,
-      credentials: 'include',
-      headers: {
-        ...defaultHeaders,
-        ...authHeader,
-        ...options.headers,
+    const abortController = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    if (abortController) {
+      activeAbortControllers.add(abortController);
+      if (options.signal) {
+        options.signal.addEventListener('abort', () => {
+          try { abortController.abort(options.signal.reason); } catch {}
+        });
       }
-    });
+    }
+
+    const effectiveSignal = abortController ? abortController.signal : options.signal;
+
+    let res;
+    try {
+      res = await fetch(targetUrl, {
+        ...options,
+        signal: effectiveSignal,
+        credentials: 'include',
+        headers: {
+          ...defaultHeaders,
+          ...authHeader,
+          ...options.headers,
+        }
+      });
+    } catch (fetchErr) {
+      if (fetchErr.name === 'AbortError') {
+        const abortedPayload = {
+          success: false,
+          code: 'REQUEST_ABORTED',
+          message: 'Request was cancelled due to session staleness or client cancellation.'
+        };
+        if (typeof Response !== 'undefined') {
+          return new Response(JSON.stringify(abortedPayload), {
+            status: 499,
+            headers: { 'Content-Type': 'application/json' }
+          });
+        }
+        return {
+          ok: false,
+          status: 499,
+          json: async () => abortedPayload,
+          text: async () => JSON.stringify(abortedPayload),
+          clone: function() { return this; }
+        };
+      }
+      throw fetchErr;
+    } finally {
+      if (abortController) {
+        activeAbortControllers.delete(abortController);
+      }
+    }
 
     if (res.status === 401 && !targetUrl.includes('/auth/login') && !targetUrl.includes('/auth/profile') && !targetUrl.includes('/students/datasheet') && !targetUrl.includes('/auth/change-password')) {
       const isUserCached = !!localStorage.getItem('lumina_current_user');
@@ -85,7 +216,20 @@ export const apiService = {
       // Only dispatch session expired if the user was actively authenticated with a token and throttle by 5 seconds
       if (isUserCached && hasToken && now - sessionExpiredDebounce > 5000) {
         sessionExpiredDebounce = now;
-        window.dispatchEvent(new CustomEvent('lms_session_expired'));
+        try {
+          const resObj = typeof res.clone === 'function' ? res.clone() : res;
+          if (typeof resObj.json === 'function') {
+            resObj.json().then(data => {
+              const msg = (data?.message || '').toLowerCase();
+              const isAuthTermination = !data || data?.code === 'SESSION_INVALID' || data?.code === 'TOKEN_EXPIRED' || msg.includes('expired') || msg.includes('revoked') || msg.includes('not authorized') || msg.includes('unauthorized') || msg.includes('token failed');
+              if (isAuthTermination) {
+                window.dispatchEvent(new CustomEvent('lms_session_expired'));
+              }
+            }).catch(() => {});
+          } else {
+            window.dispatchEvent(new CustomEvent('lms_session_expired'));
+          }
+        } catch {}
       }
     }
 
@@ -93,8 +237,14 @@ export const apiService = {
       try {
         const clone = res.clone();
         clone.json().then(data => {
-          if (data && (data.code === 'MFA_SETUP_REQUIRED' || (data.message && data.message.includes('Multi-factor authentication enrollment')))) {
+          if (data && data.code === 'MFA_VERIFICATION_REQUIRED') {
+            // Pre-auth challenge token cannot access protected APIs; invalidate and reset unauthenticated state
+            localStorage.removeItem('lumina_auth_token');
+            window.dispatchEvent(new CustomEvent('lms_session_expired'));
+          } else if (data && (data.code === 'MFA_SETUP_REQUIRED' || (data.message && data.message.includes('Multi-factor authentication enrollment')))) {
             window.dispatchEvent(new CustomEvent('lms_mfa_setup_required', { detail: data }));
+          } else if (data && data.code === 'INSUFFICIENT_PRIVILEGES') {
+            window.dispatchEvent(new CustomEvent('lms_insufficient_privileges', { detail: { url: targetUrl, data } }));
           }
         }).catch(() => {});
       } catch {}
@@ -111,7 +261,7 @@ export const apiService = {
       });
       const data = await res.json();
       if (data && data.success && data.token) {
-        localStorage.setItem('lumina_auth_token', data.token);
+        setAuthToken(data.token);
       }
       return data;
     } catch (e) {
@@ -120,9 +270,16 @@ export const apiService = {
     }
   },
 
-  async setup2FA() {
+  async setup2FA(credentials) {
     try {
-      const res = await this._fetch(`${API_BASE_URL}/auth/2fa/setup`, { method: 'POST' });
+      const options = {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      };
+      if (credentials) {
+        options.body = JSON.stringify(credentials);
+      }
+      const res = await this._fetch(`${API_BASE_URL}/auth/2fa/setup`, options);
       return await res.json();
     } catch (e) {
       console.error('Setup 2FA error:', e);
@@ -139,7 +296,7 @@ export const apiService = {
       const data = await res.json();
       if (data && data.success) {
         if (data.token) {
-          localStorage.setItem('lumina_auth_token', data.token);
+          setAuthToken(data.token);
         }
         if (data.user || data.isTwoFactorEnabled) {
           try {
@@ -159,11 +316,178 @@ export const apiService = {
     }
   },
 
+  // --- SuperAdmin Passkey (WebAuthn) APIs ---
+  async getPasskeyRegisterOptions() {
+    try {
+      const res = await this._fetch(`${API_BASE_URL}/auth/passkeys/register/options`, {
+        method: 'POST'
+      });
+      return await res.json();
+    } catch (e) {
+      console.error('getPasskeyRegisterOptions error:', e);
+      return { success: false, message: 'Network error getting passkey registration options' };
+    }
+  },
+
+  async verifyPasskeyRegister(response, deviceLabel) {
+    try {
+      const res = await this._fetch(`${API_BASE_URL}/auth/passkeys/register/verify`, {
+        method: 'POST',
+        body: JSON.stringify({ response, deviceLabel })
+      });
+      return await res.json();
+    } catch (e) {
+      console.error('verifyPasskeyRegister error:', e);
+      return { success: false, message: 'Network error verifying passkey registration' };
+    }
+  },
+
+  async getPasskeyLoginOptions(email) {
+    try {
+      const res = await this._fetch(`${API_BASE_URL}/auth/passkeys/login/options`, {
+        method: 'POST',
+        body: JSON.stringify({ email })
+      });
+      return await res.json();
+    } catch (e) {
+      console.error('getPasskeyLoginOptions error:', e);
+      return { success: false, message: 'Network error getting passkey login options' };
+    }
+  },
+
+  async verifyPasskeyLogin(response) {
+    try {
+      const res = await this._fetch(`${API_BASE_URL}/auth/passkeys/login/verify`, {
+        method: 'POST',
+        body: JSON.stringify({ response })
+      });
+      const data = await res.json();
+      if (data && data.success && data.token) {
+        setAuthToken(data.token);
+      }
+      return data;
+    } catch (e) {
+      console.error('verifyPasskeyLogin error:', e);
+      return { success: false, message: 'Network error during passkey login' };
+    }
+  },
+
+  async getPasskeys() {
+    try {
+      const res = await this._fetch(`${API_BASE_URL}/auth/passkeys`);
+      return await res.json();
+    } catch (e) {
+      console.error('getPasskeys error:', e);
+      return { success: false, passkeys: [] };
+    }
+  },
+
+  async deletePasskey(id, { currentPassword, secondFactorCode }) {
+    try {
+      const res = await this._fetch(`${API_BASE_URL}/auth/passkeys/${id}`, {
+        method: 'DELETE',
+        body: JSON.stringify({ currentPassword, secondFactorCode })
+      });
+      return await res.json();
+    } catch (e) {
+      console.error('deletePasskey error:', e);
+      return { success: false, message: 'Network error removing passkey' };
+    }
+  },
+
+  // --- SuperAdmin Security Email Binding APIs ---
+  async getSecurityEmailStatus() {
+    try {
+      const res = await this._fetch(`${API_BASE_URL}/auth/superadmin/security-email/status`);
+      return await res.json();
+    } catch (e) {
+      console.error('getSecurityEmailStatus error:', e);
+      return { success: false };
+    }
+  },
+
+  async sendSecurityEmailOtp() {
+    try {
+      const res = await this._fetch(`${API_BASE_URL}/auth/superadmin/security-email/send-otp`, {
+        method: 'POST'
+      });
+      return await res.json();
+    } catch (e) {
+      console.error('sendSecurityEmailOtp error:', e);
+      return { success: false, message: 'Network error sending OTP' };
+    }
+  },
+
+  async verifySecurityEmailOtp(code) {
+    try {
+      const res = await this._fetch(`${API_BASE_URL}/auth/superadmin/security-email/verify-otp`, {
+        method: 'POST',
+        body: JSON.stringify({ code })
+      });
+      return await res.json();
+    } catch (e) {
+      console.error('verifySecurityEmailOtp error:', e);
+      return { success: false, message: 'Network error verifying OTP' };
+    }
+  },
+
+  // --- SuperAdmin Passkey Account Recovery APIs ---
+  async requestPasskeyRecovery(identifier) {
+    try {
+      const res = await this._fetch(`${API_BASE_URL}/auth/recovery/request`, {
+        method: 'POST',
+        body: JSON.stringify({ identifier })
+      });
+      return await res.json();
+    } catch (e) {
+      console.error('requestPasskeyRecovery error:', e);
+      return { success: false, message: 'Network error requesting recovery' };
+    }
+  },
+
+  async verifyPasskeyRecovery(token) {
+    try {
+      const res = await this._fetch(`${API_BASE_URL}/auth/recovery/verify`, {
+        method: 'POST',
+        body: JSON.stringify({ token })
+      });
+      const data = await res.json();
+      if (data && data.success && data.recoverySessionToken) {
+        setAuthToken(data.recoverySessionToken);
+      }
+      return data;
+    } catch (e) {
+      console.error('verifyPasskeyRecovery error:', e);
+      return { success: false, message: 'Network error verifying recovery token' };
+    }
+  },
+
   async logout() {
     try {
-      localStorage.removeItem('lumina_auth_token');
-      const res = await this._fetch(`${API_BASE_URL}/auth/logout`, { method: 'POST' });
-      return await res.json();
+      const currentToken = getAuthToken();
+      let res;
+      try {
+        res = await this._fetch(`${API_BASE_URL}/auth/logout`, {
+          method: 'POST',
+          headers: currentToken ? { 'Authorization': `Bearer ${currentToken}` } : {}
+        });
+      } catch (fetchErr) {
+        console.warn('Backend logout request encountered network error:', fetchErr.message);
+      }
+
+      setAuthToken(null);
+      try {
+        localStorage.removeItem('lumina_auth_token');
+        localStorage.removeItem('token');
+        localStorage.removeItem('jwt');
+        localStorage.removeItem('lumina_current_user');
+        sessionStorage.removeItem('lumina_selected_institution');
+        sessionStorage.removeItem('token');
+        sessionStorage.removeItem('jwt');
+        sessionStorage.removeItem('lumina_auth_token');
+      } catch {}
+
+      return res ? await res.json() : { success: true };
     } catch (e) {
       console.error('Logout error:', e);
       return { success: false };
@@ -177,6 +501,20 @@ export const apiService = {
       try {
         data = await res.json();
       } catch (_) {}
+
+      // HTTP 304 Not Modified: Cached session is verified as active and valid on the server
+      if (res.status === 304) {
+        let cachedUser = null;
+        try {
+          cachedUser = JSON.parse(localStorage.getItem('lumina_current_user') || 'null');
+        } catch (_) {}
+        return {
+          success: true,
+          status: 304,
+          user: cachedUser,
+          cached: true
+        };
+      }
 
       if (res.ok) {
         return {
@@ -226,9 +564,16 @@ export const apiService = {
     return this.updateStudentProfile(profileData);
   },
 
-  async getStudentsDataSheet() {
+  async getStudentsDataSheet(tenantId) {
     try {
-      const res = await this._fetch(`${API_BASE_URL}/students/datasheet`);
+      let url = `${API_BASE_URL}/students/datasheet`;
+      if (tenantId) {
+        const id = typeof tenantId === 'object' ? (tenantId.tenantId || tenantId.collegeId || tenantId._id || tenantId.id) : tenantId;
+        if (id) {
+          url += `?tenantId=${encodeURIComponent(id)}`;
+        }
+      }
+      const res = await this._fetch(url);
       if (res.ok) {
         return await res.json();
       }
@@ -265,15 +610,90 @@ export const apiService = {
     }
   },
 
-  async deleteStudent(studentId) {
+  async deleteStudent(studentId, permanent = false) {
     try {
-      const res = await this._fetch(`${API_BASE_URL}/students/${studentId}`, {
+      const res = await this._fetch(`${API_BASE_URL}/students/${studentId}${permanent ? '?permanent=true' : ''}`, {
         method: 'DELETE',
       });
-      return await res.json();
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        return { success: true, ...data };
+      }
+
+      // If standard student route returned 403 or 404, fallback to administrative endpoint /admin/students/:id
+      if (res.status === 403 || res.status === 404) {
+        const adminRes = await this._fetch(`${API_BASE_URL}/admin/students/${studentId}${permanent ? '?permanent=true' : ''}`, {
+          method: 'DELETE',
+        });
+        const adminData = await adminRes.json().catch(() => ({}));
+        if (adminRes.ok) {
+          return { success: true, ...adminData };
+        }
+      }
+
+      return { success: false, status: res.status, message: data?.message || `Failed to delete student (HTTP ${res.status})` };
     } catch (e) {
       console.error('Delete student error:', e);
-      return { success: false };
+      return { success: false, message: e.message };
+    }
+  },
+
+  async bulkDeleteStudents(studentIds, permanent = false) {
+    try {
+      const res = await this._fetch(`${API_BASE_URL}/students/bulk-delete`, {
+        method: 'POST',
+        body: JSON.stringify({ studentIds, permanent })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        return { success: true, ...data };
+      }
+      return { success: false, status: res.status, message: data?.message || `Failed to delete students (HTTP ${res.status})` };
+    } catch (e) {
+      console.error('bulkDeleteStudents error:', e);
+      return { success: false, message: e.message };
+    }
+  },
+
+  async restoreStudent(studentId) {
+    try {
+      const res = await this._fetch(`${API_BASE_URL}/students/${studentId}/restore`, {
+        method: 'POST'
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        return { success: true, ...data };
+      }
+      return { success: false, status: res.status, message: data?.message || 'Failed to restore student.' };
+    } catch (e) {
+      console.error('restoreStudent error:', e);
+      return { success: false, message: e.message };
+    }
+  },
+
+  async restoreAdminStudent(studentId) {
+    try {
+      const res = await this._fetch(`${API_BASE_URL}/admin/students/${studentId}/restore`, {
+        method: 'POST'
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        return { success: true, ...data };
+      }
+      return { success: false, status: res.status, message: data?.message || 'Failed to restore student.' };
+    } catch (e) {
+      console.error('restoreAdminStudent error:', e);
+      return { success: false, message: e.message };
+    }
+  },
+
+  async getStudentDetail(studentId) {
+    try {
+      const res = await this._fetch(`${API_BASE_URL}/students/${studentId}`);
+      return await res.json();
+    } catch (e) {
+      console.error('getStudentDetail error:', e);
+      return { success: false, message: e.message };
     }
   },
 
@@ -1100,16 +1520,6 @@ export const apiService = {
     }
   },
 
-  async getStorageDownloadUrl(s3Key) {
-    try {
-      const res = await this._fetch(`${API_BASE_URL}/storage/download?key=${encodeURIComponent(s3Key)}`);
-      return await res.json();
-    } catch (e) {
-      console.error('getStorageDownloadUrl error:', e);
-      return { success: false, message: 'Network error retrieving download link' };
-    }
-  },
-
   // ─── Storage Endpoints (Phase 5) ─────────────────────────────────────────
   async getStorageStatus() {
     try {
@@ -1172,6 +1582,18 @@ export const apiService = {
     }
   },
 
+  async deleteAdminBatch(id, force = false) {
+    try {
+      const res = await this._fetch(`${API_BASE_URL}/admin/batches/${id}${force ? '?force=true' : ''}`, {
+        method: 'DELETE'
+      });
+      return await res.json();
+    } catch (e) {
+      console.error('deleteAdminBatch error:', e);
+      return { success: false, message: 'Network error deleting batch' };
+    }
+  },
+
   async getAdminTrainers() {
     try {
       const res = await this._fetch(`${API_BASE_URL}/admin/trainers`);
@@ -1192,6 +1614,54 @@ export const apiService = {
     } catch (e) {
       console.error('createAdminTrainer error:', e);
       return { success: false, message: 'Network error provisioning trainer' };
+    }
+  },
+
+  async getAdminTrainerDetail(id) {
+    try {
+      const res = await this._fetch(`${API_BASE_URL}/admin/trainers/${id}`);
+      return await res.json();
+    } catch (e) {
+      console.error('getAdminTrainerDetail error:', e);
+      return { success: false, message: 'Network error fetching trainer details' };
+    }
+  },
+
+  async updateAdminTrainer(id, payload) {
+    try {
+      const res = await this._fetch(`${API_BASE_URL}/admin/trainers/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(payload)
+      });
+      return await res.json();
+    } catch (e) {
+      console.error('updateAdminTrainer error:', e);
+      return { success: false, message: 'Network error updating trainer' };
+    }
+  },
+
+  async deleteAdminTrainer(id) {
+    try {
+      const res = await this._fetch(`${API_BASE_URL}/admin/trainers/${id}`, {
+        method: 'DELETE'
+      });
+      return await res.json();
+    } catch (e) {
+      console.error('deleteAdminTrainer error:', e);
+      return { success: false, message: 'Network error deactivating trainer' };
+    }
+  },
+
+  async reassignAdminTrainer(id, payload) {
+    try {
+      const res = await this._fetch(`${API_BASE_URL}/admin/trainers/${id}/reassign`, {
+        method: 'POST',
+        body: JSON.stringify(payload)
+      });
+      return await res.json();
+    } catch (e) {
+      console.error('reassignAdminTrainer error:', e);
+      return { success: false, message: 'Network error reassigning trainer' };
     }
   },
 
@@ -1258,13 +1728,53 @@ export const apiService = {
     }
   },
 
-  async getAdminAuditLogs() {
+  async getAdminAuditLogs(params = {}) {
     try {
-      const res = await this._fetch(`${API_BASE_URL}/admin/audit-logs`);
+      const cleanParams = Object.fromEntries(
+        Object.entries(params).filter(([_, v]) => v !== undefined && v !== null && v !== '')
+      );
+      const query = new URLSearchParams(cleanParams).toString();
+      const res = await this._fetch(`${API_BASE_URL}/admin/audit-logs${query ? `?${query}` : ''}`);
       return await res.json();
     } catch (e) {
       console.error('getAdminAuditLogs error:', e);
       return { success: false, logs: [] };
+    }
+  },
+
+  async getSecurityPolicies() {
+    try {
+      const res = await this._fetch(`${API_BASE_URL}/admin/security-policies`);
+      return await res.json();
+    } catch (e) {
+      console.error('getSecurityPolicies error:', e);
+      return { success: false, message: 'Network error loading security policies' };
+    }
+  },
+
+  async updateSecurityPolicies(payload) {
+    try {
+      const res = await this._fetch(`${API_BASE_URL}/admin/security-policies`, {
+        method: 'PUT',
+        body: JSON.stringify(payload)
+      });
+      return await res.json();
+    } catch (e) {
+      console.error('updateSecurityPolicies error:', e);
+      return { success: false, message: 'Network error updating security policies' };
+    }
+  },
+
+  async getAdminInstitutionProfile(tenantId) {
+    try {
+      const url = tenantId 
+        ? `${API_BASE_URL}/admin/institution-profile?tenantId=${tenantId}`
+        : `${API_BASE_URL}/admin/institution-profile`;
+      const res = await this._fetch(url);
+      return await res.json();
+    } catch (e) {
+      console.error('getAdminInstitutionProfile error:', e);
+      return { success: false, message: 'Network error loading institution profile' };
     }
   },
 
@@ -1302,6 +1812,18 @@ export const apiService = {
     } catch (e) {
       console.error('updateAdminCourse error:', e);
       return { success: false, message: 'Network error updating course' };
+    }
+  },
+
+  async deleteAdminCourse(id, force = false) {
+    try {
+      const res = await this._fetch(`${API_BASE_URL}/admin/courses/${id}${force ? '?force=true' : ''}`, {
+        method: 'DELETE'
+      });
+      return await res.json();
+    } catch (e) {
+      console.error('deleteAdminCourse error:', e);
+      return { success: false, message: 'Network error deleting course' };
     }
   },
 
@@ -1485,7 +2007,7 @@ export const apiService = {
       return await res.json();
     } catch (e) {
       console.error('getAdminSchools error:', e);
-      return { success: false, schools: [], count: 0 };
+      return { success: false, schools: [], count: 0, code: 'FETCH_FAILED', message: e.message || 'Failed to fetch schools' };
     }
   },
 
@@ -1505,10 +2027,15 @@ export const apiService = {
         method: 'POST',
         body: JSON.stringify(schoolData)
       });
-      return await res.json();
+      const contentType = res.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        return await res.json();
+      }
+      const text = await res.text();
+      return { success: res.ok, message: text || `Server returned HTTP ${res.status}` };
     } catch (e) {
       console.error('createAdminSchool error:', e);
-      return { success: false, message: 'Network error registering school' };
+      return { success: false, message: e.message || 'Network error registering school' };
     }
   },
 
@@ -1593,6 +2120,76 @@ export const apiService = {
     } catch (e) {
       console.error('assignAdminSchoolContent error:', e);
       return { success: false, message: 'Network error assigning cohort content' };
+    }
+  },
+
+  async getAdminSchoolAcademicConfig(schoolId) {
+    try {
+      const res = await this._fetch(`${API_BASE_URL}/admin/schools/${schoolId}/academic-config`);
+      return await res.json();
+    } catch (e) {
+      console.error('getAdminSchoolAcademicConfig error:', e);
+      return { success: false, message: e.message };
+    }
+  },
+
+  async updateAdminSchoolAcademicConfig(schoolId, config) {
+    try {
+      const res = await this._fetch(`${API_BASE_URL}/admin/schools/${schoolId}/academic-config`, {
+        method: 'PUT',
+        body: JSON.stringify(config)
+      });
+      return await res.json();
+    } catch (e) {
+      console.error('updateAdminSchoolAcademicConfig error:', e);
+      return { success: false, message: e.message };
+    }
+  },
+
+  async archiveAdminSchool(schoolId) {
+    try {
+      const res = await this._fetch(`${API_BASE_URL}/admin/schools/${schoolId}/archive`, {
+        method: 'POST'
+      });
+      return await res.json();
+    } catch (e) {
+      console.error('archiveAdminSchool error:', e);
+      return { success: false, message: e.message };
+    }
+  },
+
+  async restoreAdminSchool(schoolId) {
+    try {
+      const res = await this._fetch(`${API_BASE_URL}/admin/schools/${schoolId}/restore`, {
+        method: 'POST'
+      });
+      return await res.json();
+    } catch (e) {
+      console.error('restoreAdminSchool error:', e);
+      return { success: false, message: e.message };
+    }
+  },
+
+  async getAdminSchoolPreDeleteInspection(schoolId) {
+    try {
+      const res = await this._fetch(`${API_BASE_URL}/admin/schools/${schoolId}/pre-delete-inspection`);
+      return await res.json();
+    } catch (e) {
+      console.error('getAdminSchoolPreDeleteInspection error:', e);
+      return { success: false, message: e.message };
+    }
+  },
+
+  async deleteAdminSchool(schoolId, confirmationCode) {
+    try {
+      const res = await this._fetch(`${API_BASE_URL}/admin/schools/${schoolId}`, {
+        method: 'DELETE',
+        body: JSON.stringify({ confirmationCode })
+      });
+      return await res.json();
+    } catch (e) {
+      console.error('deleteAdminSchool error:', e);
+      return { success: false, message: e.message };
     }
   }
 };

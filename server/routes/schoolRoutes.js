@@ -347,10 +347,18 @@ router.post('/homework/:assignmentId/submit', async (req, res) => {
     const studentName = req.user?.name || 'Student';
     const studentIdentifier = req.user?.studentId || '';
     const { assignmentId } = req.params;
-    const { submissionText = '', code = '', submissionFile = '' } = req.body;
+    const {
+      submissionText = '',
+      code = '',
+      submissionFile = '',
+      content = '',
+      attachmentUrl = '',
+      fileUrl = ''
+    } = req.body;
 
-    const textToSave = submissionText || code;
-    if (!textToSave.trim() && !submissionFile) {
+    const textToSave = submissionText || code || content;
+    const resolvedFile = submissionFile || attachmentUrl || fileUrl;
+    if (!textToSave.trim() && !resolvedFile) {
       return res.status(400).json({ success: false, message: 'Submission content or attachment cannot be empty' });
     }
 
@@ -376,8 +384,9 @@ router.post('/homework/:assignmentId/submit', async (req, res) => {
       feedback: null
     };
 
-    if (submissionFile) {
-      updatePayload.submissionFile = submissionFile;
+    if (resolvedFile) {
+      updatePayload.submissionFile = resolvedFile;
+      updatePayload.fileUrl = resolvedFile;
     }
 
     const submission = await Submission.findOneAndUpdate(

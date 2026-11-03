@@ -19,14 +19,43 @@ import bcrypt from 'bcrypt';
 import mongoose from 'mongoose';
 import { createCriticalAuditLog, actorFromRequest } from '../utils/auditLogger.js';
 import generateSecureTemporaryPassword from '../utils/passwordGenerator.js';
+import { revokeAllUserSessions } from '../services/sessionService.js';
+import { handleDatabaseError } from '../utils/errorHandler.js';
+import { requireIdempotency } from '../middleware/idempotencyMiddleware.js';
 
 const router = express.Router();
+
+router.use(requireIdempotency());
 
 // All routes require trainer, teacher, admin, or superadmin under RBAC rules
 router.use(verifyToken, requireRole('trainer', 'teacher', 'admin', 'superadmin'));
 
+// Strict Tenant Isolation: Every tenant-bound operation requires a validated tenantId.
+// Non-superadmin users MUST have an assigned tenantId. SuperAdmins without a tenant context
+// must provide target tenant via req.query.tenantId or req.headers['x-tenant-id'].
+router.use((req, res, next) => {
+  if (req.user?.role !== 'superadmin' && !req.tenantId) {
+    return res.status(403).json({
+      success: false,
+      code: 'MISSING_TENANT_CONTEXT',
+      message: 'Account does not belong to a valid tenant institution.'
+    });
+  }
+  // For SuperAdmin accessing trainer routes, resolve target tenant if explicitly provided
+  if (req.user?.role === 'superadmin' && !req.tenantId) {
+    const requestedTenant = req.query.tenantId || req.headers['x-tenant-id'];
+    if (requestedTenant && mongoose.Types.ObjectId.isValid(requestedTenant)) {
+      req.tenantId = requestedTenant.toString();
+    }
+  }
+  next();
+});
+
 router.post('/attendance', async (req, res) => {
   try {
+    if (!req.tenantId) {
+      return res.status(403).json({ success: false, code: 'MISSING_TENANT_CONTEXT', message: 'Tenant context required for attendance creation.' });
+    }
     const data = { ...req.body, trainerId: req.user._id, tenantId: req.tenantId };
     const record = await Attendance.create(data);
     res.status(201).json({ success: true, record });
@@ -37,6 +66,9 @@ router.post('/attendance', async (req, res) => {
 
 router.delete('/attendance/:id', async (req, res) => {
   try {
+    if (!req.tenantId) {
+      return res.status(403).json({ success: false, code: 'MISSING_TENANT_CONTEXT', message: 'Tenant context required.' });
+    }
     const { id } = req.params;
     const deleted = await Attendance.findOneAndDelete({
       _id: id,
@@ -53,6 +85,9 @@ router.delete('/attendance/:id', async (req, res) => {
 
 router.get('/submissions', async (req, res) => {
   try {
+    if (!req.tenantId) {
+      return res.status(403).json({ success: false, code: 'MISSING_TENANT_CONTEXT', message: 'Tenant context required to retrieve submissions.' });
+    }
     const query = { tenantId: req.tenantId };
     const submissions = await Submission.find(query)
       .populate('assignmentId', 'title courseId courseCode courseTitle points')
@@ -86,9 +121,10 @@ router.get('/submissions', async (req, res) => {
 
 router.post('/assignments/:id/grade', async (req, res) => {
   try {
-    const { studentId, score, feedback, status: requestedStatus } = req.body;
+    const { studentId, score, marks, feedback, status: requestedStatus } = req.body;
     const targetStatus = requestedStatus === 'needs_revision' ? 'needs_revision' : 'graded';
-    const numScore = score !== undefined && score !== null && score !== '' ? Number(score) : null;
+    const effectiveScore = score !== undefined && score !== null && score !== '' ? score : marks;
+    const numScore = effectiveScore !== undefined && effectiveScore !== null && effectiveScore !== '' ? Number(effectiveScore) : null;
 
     if (targetStatus === 'graded') {
       if (numScore === null || isNaN(numScore) || numScore < 0) {
@@ -168,6 +204,7 @@ router.post('/assignments/:id/grade', async (req, res) => {
     submission.gradedAt = new Date();
     if (numScore !== null) {
       submission.score = numScore;
+      submission.marks = numScore;
     }
 
     await submission.save();
@@ -249,6 +286,9 @@ router.post('/students/:studentId/reset-password', async (req, res) => {
     student.mustChangePassword = true;
     await student.save();
 
+    // Invalidate active sessions upon password reset
+    await revokeAllUserSessions(student._id, 'trainer_password_reset');
+
     try {
       await createCriticalAuditLog({
         tenantId: req.tenantId,
@@ -292,8 +332,26 @@ router.get('/students', async (req, res) => {
     const tenantFilter = { tenantId: req.tenantId };
     const query = { ...tenantFilter, role: 'student', soft_deleted: { $ne: true } };
 
-    if ((req.user.role === 'trainer' || req.user.role === 'teacher') && req.user.batchId) {
-      query.batchId = req.user.batchId;
+    if (req.user.role === 'trainer' || req.user.role === 'teacher') {
+      const assignedBatches = await Batch.find({
+        tenantId: req.tenantId,
+        $or: [
+          ...(req.user.batchId ? [{ _id: req.user.batchId }] : []),
+          { assignedTrainers: req.user._id }
+        ]
+      }).select('_id').lean();
+
+      const batchIds = assignedBatches.map((b) => b._id);
+      if (req.user.batchId && !batchIds.some((id) => id.toString() === req.user.batchId.toString())) {
+        batchIds.push(req.user.batchId);
+      }
+
+      if (batchIds.length > 0) {
+        query.batchId = { $in: batchIds };
+      } else {
+        // Strict boundary: When educator has no assigned cohorts in this tenant, return empty list
+        return res.json({ success: true, count: 0, students: [] });
+      }
     }
 
     let students = await User.find(query).select('-password').sort({ name: 1 }).lean();
@@ -781,46 +839,61 @@ router.get('/analytics', async (req, res) => {
     const isTrainerOrTeacher = req.user.role === 'trainer' || req.user.role === 'teacher';
     const tenantFilter = isSuperAdmin ? (req.query.tenantId ? { tenantId: req.query.tenantId } : {}) : { tenantId: req.tenantId };
 
-    const hasValidBatchId = req.user.batchId && mongoose.Types.ObjectId.isValid(req.user.batchId);
+    let batchIds = [];
+    if (isTrainerOrTeacher) {
+      const assignedBatches = await Batch.find({
+        tenantId: req.tenantId,
+        $or: [
+          ...(req.user.batchId ? [{ _id: req.user.batchId }] : []),
+          { assignedTrainers: req.user._id }
+        ]
+      }).select('_id').lean();
 
-    // If an authenticated trainer has NO assigned cohort, return genuine zero-value metrics
-    if (isTrainerOrTeacher && !hasValidBatchId) {
-      return res.json({
-        success: true,
-        data: {
-          totalStudents: 0,
-          activeCourses: 0,
-          totalAttendance: 0,
-          attendanceRate: null,
-          totalSubmissions: 0,
-          gradedSubmissions: 0,
-          averageScore: null
-        }
-      });
+      batchIds = assignedBatches.map((b) => b._id);
+      if (req.user.batchId && !batchIds.some((id) => id.toString() === req.user.batchId.toString())) {
+        batchIds.push(req.user.batchId);
+      }
+
+      // If an authenticated trainer/teacher has NO assigned cohort, return genuine zero-value metrics
+      if (batchIds.length === 0) {
+        return res.json({
+          success: true,
+          data: {
+            totalStudents: 0,
+            activeCohortsCount: 0,
+            activeCourses: 0,
+            totalAttendance: 0,
+            attendanceRate: null,
+            totalSubmissions: 0,
+            gradedSubmissions: 0,
+            averageScore: null
+          }
+        });
+      }
     }
 
     const studentFilter = { ...tenantFilter, role: 'student', soft_deleted: { $ne: true } };
-    if (isTrainerOrTeacher && hasValidBatchId) {
-      studentFilter.batchId = new mongoose.Types.ObjectId(req.user.batchId);
+    if (isTrainerOrTeacher && batchIds.length > 0) {
+      studentFilter.batchId = { $in: batchIds };
     }
 
     // Build attendance query scoped to cohort / tenant
     const attendanceFilter = { ...tenantFilter };
-    if (isTrainerOrTeacher && hasValidBatchId) {
-      attendanceFilter.batchId = new mongoose.Types.ObjectId(req.user.batchId);
+    if (isTrainerOrTeacher && batchIds.length > 0) {
+      attendanceFilter.batchId = { $in: batchIds };
     } else if (req.user._id && mongoose.Types.ObjectId.isValid(req.user._id)) {
       attendanceFilter.$or = [{ trainerId: req.user._id }, tenantFilter];
     }
 
     // Build submissions query scoped to students in assigned cohort
     let submissionFilter = { ...tenantFilter };
-    if (isTrainerOrTeacher && hasValidBatchId) {
+    if (isTrainerOrTeacher && batchIds.length > 0) {
       const cohortStudentIds = await User.find(studentFilter).select('_id').lean().catch(() => []);
       submissionFilter.studentId = { $in: cohortStudentIds.map(s => s._id) };
     }
 
-    const courseFilter = isTrainerOrTeacher && hasValidBatchId
-      ? { ...tenantFilter, $or: [{ batchId: new mongoose.Types.ObjectId(req.user.batchId) }, { instructorId: req.user._id }] }
+    const courseFilter = isTrainerOrTeacher && batchIds.length > 0
+      ? { ...tenantFilter, $or: [{ batchId: { $in: batchIds } }, { instructorId: req.user._id }] }
       : tenantFilter;
 
     const [totalStudents, activeCourses, totalAttendance, presentAttendance, submissions] = await Promise.all([
@@ -862,6 +935,7 @@ router.get('/analytics', async (req, res) => {
       success: true,
       data: {
         totalStudents: totalStudents || 0,
+        activeCohortsCount: isTrainerOrTeacher ? batchIds.length : (await Batch.countDocuments({ ...tenantFilter, status: { $ne: 'deleted' } }).catch(() => 0)),
         activeCourses: activeCourses || 0,
         totalAttendance: totalAttendance || 0,
         attendanceRate,
@@ -1626,8 +1700,25 @@ router.get('/classes', async (req, res) => {
 
     const tenantFilter = { tenantId: req.tenantId };
     const batchFilter = { ...tenantFilter, status: { $ne: 'deleted' } };
-    if ((req.user.role === 'trainer' || req.user.role === 'teacher') && req.user.batchId) {
-      batchFilter._id = req.user.batchId;
+    if (req.user.role === 'trainer' || req.user.role === 'teacher') {
+      const assignedBatches = await Batch.find({
+        tenantId: req.tenantId,
+        $or: [
+          ...(req.user.batchId ? [{ _id: req.user.batchId }] : []),
+          { assignedTrainers: req.user._id }
+        ]
+      }).select('_id').lean();
+
+      const batchIds = assignedBatches.map((b) => b._id);
+      if (req.user.batchId && !batchIds.some((id) => id.toString() === req.user.batchId.toString())) {
+        batchIds.push(req.user.batchId);
+      }
+
+      if (batchIds.length > 0) {
+        batchFilter._id = { $in: batchIds };
+      } else {
+        return res.json({ success: true, count: 0, classes: [] });
+      }
     }
     const batches = await Batch.find(batchFilter).lean();
 
@@ -1766,6 +1857,14 @@ router.post('/tests', async (req, res) => {
     );
 
     const testId = `test-${Date.now()}`;
+    const sanitizedQuestions = (Array.isArray(questions) ? questions : []).map((q, idx) => ({
+      ...q,
+      id: q.id || `q${idx + 1}`,
+      prompt: q.prompt || q.text || q.question || q.title || `Question ${idx + 1}`,
+      title: q.title || q.text || q.prompt || '',
+      type: q.type || 'mcq'
+    }));
+
     const newExam = await Assessment.create({
       tenantId: req.tenantId,
       id: testId,
@@ -1780,7 +1879,7 @@ router.post('/tests', async (req, res) => {
       totalMarks: Number(totalMarks) || 20,
       durationMinutes: Number(durationMinutes) || 45,
       isCodingExam: isCodingExam ?? true,
-      questions: Array.isArray(questions) ? questions : [],
+      questions: sanitizedQuestions,
       challenge: challenge || null,
       status: 'scheduled'
     });
@@ -1879,6 +1978,10 @@ router.delete('/tests/:id', async (req, res) => {
         $or: [{ assessmentId: canonicalId }, { assessmentId: testDoc._id.toString() }]
       }),
       AssessmentEvent.deleteMany({
+        tenantId: req.tenantId,
+        $or: [{ assessmentId: canonicalId }, { assessmentId: testDoc._id.toString() }]
+      }),
+      RetakeAuthorization.deleteMany({
         tenantId: req.tenantId,
         $or: [{ assessmentId: canonicalId }, { assessmentId: testDoc._id.toString() }]
       })

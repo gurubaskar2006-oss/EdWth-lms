@@ -181,11 +181,11 @@ export const DashboardView = ({ onOpenSubmitModal }) => {
                     marginBottom: '1.35rem'
                   }}
                 >
-                  <span style={{ color: 'var(--accent-blue)', fontWeight: 600 }}>Next:</span>
-                  <span>Attention Mechanisms & GPT-2 Architecture</span>
+                  <span style={{ color: 'var(--accent-blue)', fontWeight: 600 }}>Active Topic:</span>
+                  <span>{activeCourse.syllabus?.[0]?.lessons?.[0]?.title || activeCourse.title || 'Coursework in progress'}</span>
                   <span>•</span>
                   <span style={{ display: 'flex', alignItems: 'center', gap: '4px', color: 'var(--text-muted)' }}>
-                    <Clock size={13} /> 25 min lecture
+                    <Clock size={13} /> {activeCourse.estimatedHours || 20}h syllabus
                   </span>
                 </div>
 
@@ -280,7 +280,7 @@ export const DashboardView = ({ onOpenSubmitModal }) => {
               </div>
             </div>
             <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', borderTop: '1px solid var(--border-default)', paddingTop: '0.65rem' }}>
-              <span>15 registered credits this term</span>
+              <span>{enrolledCourses.reduce((acc, c) => acc + (c.credits || 0), 0)} registered credits this term</span>
             </div>
           </div>
 
@@ -343,12 +343,12 @@ export const DashboardView = ({ onOpenSubmitModal }) => {
                 </div>
               </div>
               <div style={{ fontSize: '2rem', fontWeight: 800, color: 'var(--text-primary)', marginBottom: '0.25rem', letterSpacing: '-0.02em' }}>
-                {user.stats?.gpa || user.gpa || '3.92'}
+                {user?.stats?.gpa || user?.gpa || '—'}
               </div>
             </div>
-            <div style={{ fontSize: '0.78rem', color: 'var(--accent-primary)', borderTop: '1px solid var(--border-default)', paddingTop: '0.65rem', display: 'flex', alignItems: 'center', gap: '4px', fontWeight: 600 }}>
+            <div style={{ fontSize: '0.78rem', color: (user?.stats?.gpa || user?.gpa) ? 'var(--accent-primary)' : 'var(--text-muted)', borderTop: '1px solid var(--border-default)', paddingTop: '0.65rem', display: 'flex', alignItems: 'center', gap: '4px', fontWeight: 600 }}>
               <CheckCircle2 size={13} />
-              <span>Dean's Academic Honors</span>
+              <span>{(user?.stats?.gpa || user?.gpa) ? "Dean's Academic Honors" : "No verified GPA recorded"}</span>
             </div>
           </div>
 
@@ -407,9 +407,19 @@ export const DashboardView = ({ onOpenSubmitModal }) => {
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
-          {enrolledCourses.map((course) => (
-            <CourseCard key={course.id} course={course} variant="horizontal" />
-          ))}
+          {enrolledCourses.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '2.5rem 1rem', backgroundColor: 'var(--bg-card)', border: '1px dashed var(--border-default)', borderRadius: 'var(--radius-lg)' }}>
+              <BookOpen size={36} color="var(--text-muted)" style={{ margin: '0 auto 0.75rem', opacity: 0.5 }} />
+              <h4 style={{ fontSize: '1rem', color: 'var(--text-primary)', fontWeight: 700 }}>No enrolled courses yet</h4>
+              <p style={{ color: 'var(--text-secondary)', fontSize: '0.84rem', marginTop: '0.25rem' }}>
+                You have not registered for any active courses this term. Browse the catalog to begin learning.
+              </p>
+            </div>
+          ) : (
+            enrolledCourses.map((course) => (
+              <CourseCard key={course.id} course={course} variant="horizontal" />
+            ))
+          )}
         </div>
       </section>
 
@@ -421,84 +431,100 @@ export const DashboardView = ({ onOpenSubmitModal }) => {
             <div>
               <h4 style={{ fontSize: '1.05rem', color: 'var(--text-primary)', fontWeight: 700 }}>Weekly Study Log</h4>
               <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
-                41.8 hours total verified study time this term
+                {studyAnalytics?.totalHours ? `${studyAnalytics.totalHours} hours total verified study time` : 'Verified learning time tracking'}
               </p>
             </div>
-            <span className="badge badge-emerald">On Track</span>
+            {studyAnalytics?.weeklyHours && studyAnalytics.weeklyHours.length > 0 && (
+              <span className="badge badge-emerald">On Track</span>
+            )}
           </div>
 
           {/* Bar Chart Visualization */}
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'flex-end',
-              justifyContent: 'space-between',
-              height: '160px',
-              paddingTop: '0.5rem',
-              borderBottom: '1px solid var(--border-default)',
-              paddingBottom: '0.5rem',
-              gap: '0.75rem'
-            }}
-          >
-            {studyAnalytics.weeklyHours.map((item, idx) => {
-              const maxHours = 9;
-              const barHeightPct = (item.hours / maxHours) * 100;
-              const isToday = item.day === 'Fri';
+          {studyAnalytics?.weeklyHours && studyAnalytics.weeklyHours.length > 0 ? (
+            <>
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'flex-end',
+                  justifyContent: 'space-between',
+                  height: '160px',
+                  paddingTop: '0.5rem',
+                  borderBottom: '1px solid var(--border-default)',
+                  paddingBottom: '0.5rem',
+                  gap: '0.75rem'
+                }}
+              >
+                {studyAnalytics.weeklyHours.map((item, idx) => {
+                  const maxHours = 9;
+                  const barHeightPct = (item.hours / maxHours) * 100;
+                  const isToday = item.day === 'Fri';
 
-              return (
-                <div
-                  key={idx}
-                  style={{
-                    flex: 1,
-                    display: 'flex',
-                    flexDirection: 'column',
-                    alignItems: 'center',
-                    gap: '0.4rem',
-                    height: '100%',
-                    justifyContent: 'flex-end'
-                  }}
-                >
-                  <span style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>
-                    {item.hours}h
-                  </span>
-                  <div
-                    style={{
-                      width: '100%',
-                      maxWidth: '34px',
-                      height: `${barHeightPct}%`,
-                      backgroundColor: isToday ? 'var(--accent-blue)' : '#E2E8F0',
-                      borderRadius: '4px 4px 0 0',
-                      transition: 'height 0.4s ease'
-                    }}
-                  />
-                  <span
-                    style={{
-                      fontSize: '0.74rem',
-                      fontWeight: isToday ? 700 : 500,
-                      color: isToday ? 'var(--accent-blue)' : 'var(--text-secondary)'
-                    }}
-                  >
-                    {item.day}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-
-          {/* Subject Distribution */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '0.65rem', marginTop: '1.25rem' }}>
-            {studyAnalytics.subjectDistribution.map((sub, idx) => (
-              <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.76rem' }}>
-                <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: sub.color }} />
-                <span style={{ color: 'var(--text-secondary)', flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                  {sub.subject}
-                </span>
-                <span style={{ fontWeight: 600, color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>
-                  {sub.percent}%
-                </span>
+                  return (
+                    <div
+                      key={idx}
+                      style={{
+                        flex: 1,
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        gap: '0.4rem',
+                        height: '100%',
+                        justifyContent: 'flex-end'
+                      }}
+                    >
+                      <span style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>
+                        {item.hours}h
+                      </span>
+                      <div
+                        style={{
+                          width: '100%',
+                          maxWidth: '34px',
+                          height: `${barHeightPct}%`,
+                          backgroundColor: isToday ? 'var(--accent-blue)' : '#E2E8F0',
+                          borderRadius: '4px 4px 0 0',
+                          transition: 'height 0.4s ease'
+                        }}
+                      />
+                      <span
+                        style={{
+                          fontSize: '0.74rem',
+                          fontWeight: isToday ? 700 : 500,
+                          color: isToday ? 'var(--accent-blue)' : 'var(--text-secondary)'
+                        }}
+                      >
+                        {item.day}
+                      </span>
+                    </div>
+                  );
+                })}
               </div>
-            ))}
-          </div>
+
+              {/* Subject Distribution */}
+              {studyAnalytics?.subjectDistribution && studyAnalytics.subjectDistribution.length > 0 && (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '0.65rem', marginTop: '1.25rem' }}>
+                  {studyAnalytics.subjectDistribution.map((sub, idx) => (
+                    <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.76rem' }}>
+                      <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: sub.color }} />
+                      <span style={{ color: 'var(--text-secondary)', flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {sub.subject}
+                      </span>
+                      <span style={{ fontWeight: 600, color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>
+                        {sub.percent}%
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
+          ) : (
+            <div style={{ textAlign: 'center', padding: '2.5rem 1rem', color: 'var(--text-muted)' }}>
+              <Clock size={36} color="var(--text-muted)" style={{ margin: '0 auto 0.5rem', opacity: 0.5 }} />
+              <div style={{ fontSize: '0.92rem', fontWeight: 600, color: 'var(--text-primary)' }}>No study logs recorded yet</div>
+              <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '0.25rem' }}>
+                Study time is automatically recorded when you engage in lessons and sandbox exercises.
+              </p>
+            </div>
+          )}
         </div>
 
         {/* Tier 5: Upcoming Tasks & Deadlines */}
@@ -514,10 +540,19 @@ export const DashboardView = ({ onOpenSubmitModal }) => {
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem', flex: 1 }}>
-            {assignments
-              .filter((a) => a.status !== 'graded')
-              .slice(0, 3)
-              .map((asg) => (
+            {assignments.filter((a) => a.status !== 'graded').length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '2rem 1rem', color: 'var(--text-muted)' }}>
+                <CheckCircle2 size={32} color="#059669" style={{ margin: '0 auto 0.5rem', opacity: 0.7 }} />
+                <div style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--text-primary)' }}>All assignments up to date!</div>
+                <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginTop: '0.2rem' }}>
+                  No pending tasks or urgent deadlines.
+                </p>
+              </div>
+            ) : (
+              assignments
+                .filter((a) => a.status !== 'graded')
+                .slice(0, 3)
+                .map((asg) => (
                 <div
                   key={asg.id}
                   style={{
@@ -557,7 +592,7 @@ export const DashboardView = ({ onOpenSubmitModal }) => {
                     </button>
                   </div>
                 </div>
-              ))}
+              )))}
           </div>
         </div>
       </div>
@@ -572,15 +607,15 @@ export const DashboardView = ({ onOpenSubmitModal }) => {
             <div style={{ display: 'flex', alignItems: 'center', gap: '1.75rem', marginTop: '0.4rem', flexWrap: 'wrap' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.84rem' }}>
                 <Clock size={15} color="var(--accent-primary)" />
-                <span>Attendance: <strong style={{ color: 'var(--text-primary)' }}>96% Verified</strong></span>
+                <span>Attendance: <strong style={{ color: 'var(--text-primary)' }}>{user?.attendanceRate != null ? `${user.attendanceRate}% Verified` : 'No verified records yet'}</strong></span>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.84rem' }}>
                 <TrendingUp size={15} color="var(--accent-primary)" />
-                <span>Study Streak: <strong style={{ color: 'var(--text-primary)' }}>{user.streakDays || 7} Days</strong></span>
+                <span>Study Streak: <strong style={{ color: 'var(--text-primary)' }}>{user?.streakDays ?? 0} Days</strong></span>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.84rem' }}>
                 <Award size={15} color="var(--accent-indigo)" />
-                <span>Engagement Credits: <strong style={{ color: 'var(--text-primary)' }}>{user.xp || 3450} XP</strong></span>
+                <span>Engagement Credits: <strong style={{ color: 'var(--text-primary)' }}>{user?.xp ?? 0} XP</strong></span>
               </div>
             </div>
           </div>

@@ -337,7 +337,7 @@ router.get('/:assessmentId/events', async (req, res) => {
  * GET /api/v1/assessments/active-monitoring
  * Trainer endpoint: Returns live monitoring status for active assessments in the tenant.
  */
-router.get('/active-monitoring', requireRole('trainer', 'teacher', 'admin'), async (req, res) => {
+router.get('/active-monitoring', requireRole('trainer', 'teacher', 'admin', 'superadmin'), async (req, res) => {
   const tenantId = req.tenantId || req.user?.tenantId || 'global';
   const now = Date.now();
 
@@ -361,7 +361,7 @@ router.get('/active-monitoring', requireRole('trainer', 'teacher', 'admin'), asy
  * Trainer endpoint: Returns detailed student results strictly based on persisted AssessmentAttempt records
  * and authoritative environment monitoring event timeline from MongoDB AssessmentEvent.
  */
-router.get('/:assessmentId/submissions-detailed', requireRole('trainer', 'teacher', 'admin'), async (req, res) => {
+router.get('/:assessmentId/submissions-detailed', requireRole('trainer', 'teacher', 'admin', 'superadmin'), async (req, res) => {
   const { assessmentId } = req.params;
   const tenantId = req.tenantId || req.user?.tenantId;
 
@@ -553,6 +553,15 @@ router.post('/:assessmentId/submit', async (req, res) => {
       return res.status(statusCode).json(result);
     }
 
+    if (result.isDuplicate) {
+      return res.status(409).json({
+        success: false,
+        isDuplicate: true,
+        status: result.status,
+        message: result.message || 'Assessment submission has already been received and recorded.'
+      });
+    }
+
     res.json(result);
   } catch (err) {
     console.error('Error submitting assessment:', err);
@@ -564,7 +573,7 @@ router.post('/:assessmentId/submit', async (req, res) => {
  * POST /api/v1/assessments/attempts/:attemptId/grade
  * Evaluates an assessment attempt, sets marks, percentage, feedback, and transitions to 'evaluated'.
  */
-router.post('/attempts/:attemptId/grade', requireRole('trainer', 'teacher', 'admin'), async (req, res) => {
+router.post('/attempts/:attemptId/grade', requireRole('trainer', 'teacher', 'admin', 'superadmin'), async (req, res) => {
   try {
     const { attemptId } = req.params;
     const { score, teacherFeedback = '' } = req.body;

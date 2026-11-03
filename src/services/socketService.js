@@ -1,4 +1,5 @@
 import { io } from 'socket.io-client';
+import { isSessionStale } from './apiService';
 
 class SocketService {
   constructor() {
@@ -11,6 +12,13 @@ class SocketService {
   }
 
   connect(user) {
+    // Prevent connection if session context has been invalidated or marked stale
+    if (typeof isSessionStale === 'function' && isSessionStale()) {
+      console.warn('⚡ [SocketService] Connection rejected: in-memory authentication session is stale.');
+      this.disconnect();
+      return null;
+    }
+
     const userId = user?.id || user?._id || user?.studentId || 'anonymous';
     const userRole = (user?.role || 'student').toLowerCase();
     const token = typeof window !== 'undefined' ? localStorage.getItem('lumina_auth_token') : null;
@@ -85,13 +93,15 @@ class SocketService {
 
   disconnect() {
     if (this.socket) {
-      this.socket.disconnect();
+      try {
+        this.socket.disconnect();
+      } catch {}
       this.socket = null;
-      this.isConnected = false;
-      this.connectedUserId = null;
-      this.connectedRole = null;
-      this.connectedToken = null;
     }
+    this.isConnected = false;
+    this.connectedUserId = null;
+    this.connectedRole = null;
+    this.connectedToken = null;
   }
 
   _addListener(event, callback) {

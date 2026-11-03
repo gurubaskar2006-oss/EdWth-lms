@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useLMS } from '../context/LMSContext';
 import { usePageTitle } from '../hooks/usePageTitle';
 import { apiService } from '../services/apiService';
+import { StudentsDataSheetView } from './StudentsDataSheetView';
 import {
   School,
   Building,
@@ -23,25 +24,67 @@ import {
   Filter,
   Shield,
   Layers,
-  ArrowRight
+  ArrowRight,
+  Trash2,
+  Archive,
+  RefreshCw,
+  AlertTriangle,
+  X
 } from 'lucide-react';
 
 export const MultiSchoolManagementView = () => {
   usePageTitle('Multi-School Training Management');
-  const { user, addToast } = useLMS();
+  const { user, addToast, setSelectedInstitution, selectedInstitution, setLoginModalOpen } = useLMS();
 
   const isSuperAdmin = user?.role === 'superadmin';
-  const [activeSection, setActiveSection] = useState('schools'); // 'schools' | 'cohorts' | 'assign' | 'content' | 'performance' | 'comparison'
+  const [activeSection, setActiveSection] = useState('schools'); // 'schools' | 'academic' | 'students' | 'cohorts' | 'assign' | 'content' | 'performance' | 'comparison'
   const [loading, setLoading] = useState(true);
 
   // Core data states
   const [schools, setSchools] = useState([]);
+  const [schoolsError, setSchoolsError] = useState(null);
   const [selectedSchoolId, setSelectedSchoolId] = useState('');
   const [selectedSchool, setSelectedSchool] = useState(null);
   const [comparisonData, setComparisonData] = useState([]);
   const [schoolPerformance, setSchoolPerformance] = useState(null);
   const [allStudents, setAllStudents] = useState([]);
   const [allTrainers, setAllTrainers] = useState([]);
+
+  // Filter state for directory
+  const [directoryStatusFilter, setDirectoryStatusFilter] = useState('active'); // 'active' | 'archived' | 'all'
+
+  // Archive & Permanent Delete States
+  const [archiveLoadingId, setArchiveLoadingId] = useState(null);
+  const [deleteSchoolModalOpen, setDeleteSchoolModalOpen] = useState(false);
+  const [schoolToDelete, setSchoolToDelete] = useState(null);
+  const [deleteInspectionData, setDeleteInspectionData] = useState(null);
+  const [deleteInspectionLoading, setDeleteInspectionLoading] = useState(false);
+  const [deleteConfirmCode, setDeleteConfirmCode] = useState('');
+  const [isDeletingSchool, setIsDeletingSchool] = useState(false);
+
+  // Academic Structure State
+  const [academicConfigData, setAcademicConfigData] = useState({
+    academicSession: '2026-2027',
+    classesOffered: ['Class 11', 'Class 12'],
+    groups: [
+      { id: 'grp-mpc', name: 'Group I (MPC)', stream: 'Science', subjects: ['Mathematics', 'Physics', 'Chemistry'], description: 'Maths, Physics, Chemistry' },
+      { id: 'grp-bpc', name: 'Group II (BPC)', stream: 'Science', subjects: ['Biology', 'Physics', 'Chemistry'], description: 'Biology, Physics, Chemistry' },
+      { id: 'grp-pure-science', name: 'Group III (Pure Science)', stream: 'Science', subjects: ['Physics', 'Chemistry', 'Biology', 'Mathematics'], description: 'Pure Science' },
+      { id: 'grp-commerce', name: 'Group IV (Commerce)', stream: 'Commerce', subjects: ['Commerce', 'Accountancy', 'Economics', 'Computer Applications'], description: 'Commerce & Accountancy' }
+    ],
+    sections: ['A', 'B', 'C'],
+    mediums: ['English'],
+    trainingSubjects: ['Python Programming', 'Aptitude & Logical Reasoning', 'Soft Skills']
+  });
+  const [academicConfigLoading, setAcademicConfigLoading] = useState(false);
+  const [isSavingAcademicConfig, setIsSavingAcademicConfig] = useState(false);
+  const [newGroupModalOpen, setNewGroupModalOpen] = useState(false);
+  const [newGroupForm, setNewGroupForm] = useState({
+    name: '',
+    stream: 'Science',
+    subjects: '',
+    description: ''
+  });
 
   // Modals / Forms
   const [newSchoolModalOpen, setNewSchoolModalOpen] = useState(false);
@@ -50,7 +93,8 @@ export const MultiSchoolManagementView = () => {
     code: '',
     contactEmail: '',
     contactPhone: '',
-    address: ''
+    address: '',
+    academicSession: '2026-2027'
   });
 
   const [newCohortModalOpen, setNewCohortModalOpen] = useState(false);
@@ -86,20 +130,44 @@ export const MultiSchoolManagementView = () => {
   });
 
   // Load all schools
-  const loadSchools = async () => {
+  const loadSchools = async (status = directoryStatusFilter) => {
     setLoading(true);
+    setSchoolsError(null);
     try {
       const res = await apiService.getAdminSchools();
       if (res?.success && Array.isArray(res.schools)) {
         setSchools(res.schools);
         if (res.schools.length > 0) {
-          const defaultId = selectedSchoolId || res.schools[0]._id || res.schools[0].id;
+          const defaultId = selectedSchoolId && res.schools.some(s => (s._id || s.id) === selectedSchoolId)
+            ? selectedSchoolId
+            : res.schools[0]._id || res.schools[0].id;
           setSelectedSchoolId(defaultId);
           loadSchoolDetail(defaultId);
+          loadAcademicConfig(defaultId);
+        } else {
+          setSelectedSchool(null);
+          setSelectedSchoolId('');
         }
+      } else {
+        const isInsufficient = res?.code === 'INSUFFICIENT_PRIVILEGES' || res?.status === 403;
+        const isStale = res?.code === 'SESSION_STALE_IDENTITY_MISMATCH';
+        const errorInfo = {
+          code: res?.code || (isInsufficient ? 'INSUFFICIENT_PRIVILEGES' : 'FETCH_FAILED'),
+          message: isInsufficient
+            ? 'Insufficient Privileges (403): The active session lacks Super Admin permissions for multi-school operations.'
+            : isStale
+            ? 'Session Context Stale: Another browser tab authenticated with a different identity. Please log in as Super Admin.'
+            : (res?.message || 'Failed to load participating schools. Please verify session credentials.')
+        };
+        setSchoolsError(errorInfo);
+        addToast?.('Session / Fetch Notice', errorInfo.message, 'amber');
       }
     } catch (e) {
       console.error('Error loading schools:', e);
+      setSchoolsError({
+        code: 'NETWORK_ERROR',
+        message: e.message || 'Network error loading participating schools.'
+      });
       addToast?.('Error', 'Failed to load participating schools', 'amber');
     } finally {
       setLoading(false);
@@ -112,10 +180,184 @@ export const MultiSchoolManagementView = () => {
     try {
       const res = await apiService.getAdminSchoolDetail(id);
       if (res?.success && res.school) {
+        console.log('[DIAGNOSTIC] getAdminSchoolDetail resolved:', {
+          id: res.school._id || res.school.id,
+          name: res.school.name,
+          institutionType: res.school.institutionType,
+          source: 'getAdminSchoolDetail'
+        });
         setSelectedSchool(res.school);
+        if (setSelectedInstitution) {
+          setSelectedInstitution(res.school);
+        }
       }
     } catch (e) {
       console.error('Error loading school details:', e);
+    }
+  };
+
+  // Load academic config for selected school
+  const loadAcademicConfig = async (id) => {
+    if (!id) return;
+    setAcademicConfigLoading(true);
+    try {
+      const res = await apiService.getAdminSchoolAcademicConfig(id);
+      if (res?.success && res.academicConfig) {
+        setAcademicConfigData({
+          academicSession: res.academicConfig.academicSession || '2026-2027',
+          classesOffered: res.academicConfig.classesOffered || ['Class 11', 'Class 12'],
+          groups: res.academicConfig.groups || [],
+          sections: res.academicConfig.sections || ['A', 'B', 'C'],
+          mediums: res.academicConfig.mediums || ['English'],
+          trainingSubjects: res.academicConfig.trainingSubjects || ['Python Programming', 'Aptitude & Logical Reasoning', 'Soft Skills'],
+          trainingSchedules: res.academicConfig.trainingSchedules || []
+        });
+      }
+    } catch (e) {
+      console.error('Error loading academic config:', e);
+    } finally {
+      setAcademicConfigLoading(false);
+    }
+  };
+
+  // Save academic config
+  const handleSaveAcademicConfig = async (e) => {
+    if (e && e.preventDefault) e.preventDefault();
+    if (!selectedSchoolId) return;
+
+    setIsSavingAcademicConfig(true);
+    try {
+      const res = await apiService.updateAdminSchoolAcademicConfig(selectedSchoolId, academicConfigData);
+      if (res?.success) {
+        addToast?.('Academic Structure Saved', 'Academic configuration updated successfully.', 'emerald');
+        await loadSchoolDetail(selectedSchoolId);
+        await loadSchools();
+      } else {
+        alert(res?.message || 'Failed to save academic structure.');
+      }
+    } catch (err) {
+      console.error('Error saving academic config:', err);
+      alert('Error updating academic structure: ' + err.message);
+    } finally {
+      setIsSavingAcademicConfig(false);
+    }
+  };
+
+  // Add a new Group/Stream to academic config
+  const handleAddGroupSubmit = (e) => {
+    e.preventDefault();
+    if (!newGroupForm.name.trim()) {
+      alert('Group name is required.');
+      return;
+    }
+    const subjectsArray = newGroupForm.subjects
+      .split(',')
+      .map(s => s.trim())
+      .filter(Boolean);
+
+    const newGroup = {
+      id: `grp-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      name: newGroupForm.name.trim(),
+      stream: newGroupForm.stream.trim(),
+      subjects: subjectsArray,
+      description: newGroupForm.description.trim()
+    };
+
+    setAcademicConfigData(prev => ({
+      ...prev,
+      groups: [...(prev.groups || []), newGroup]
+    }));
+
+    setNewGroupForm({ name: '', stream: 'Science', subjects: '', description: '' });
+    setNewGroupModalOpen(false);
+    addToast?.('Stream Added', `Added ${newGroup.name}. Remember to click 'Save Academic Structure'.`, 'emerald');
+  };
+
+  // Remove Group/Stream from academic config
+  const handleRemoveGroup = (groupId) => {
+    setAcademicConfigData(prev => ({
+      ...prev,
+      groups: (prev.groups || []).filter(g => g.id !== groupId)
+    }));
+  };
+
+  // Archive School Action
+  const handleArchiveSchool = async (schoolId) => {
+    if (!window.confirm('Archive this participating school? It will be hidden from active operations, but all records will remain safely preserved.')) {
+      return;
+    }
+    setArchiveLoadingId(schoolId);
+    try {
+      const res = await apiService.archiveAdminSchool(schoolId);
+      if (res?.success) {
+        addToast?.('School Archived', res.message, 'subtle');
+        await loadSchools();
+      } else {
+        alert(res?.message || 'Failed to archive school');
+      }
+    } catch (err) {
+      alert('Error archiving school: ' + err.message);
+    } finally {
+      setArchiveLoadingId(null);
+    }
+  };
+
+  // Restore School Action
+  const handleRestoreSchool = async (schoolId) => {
+    setArchiveLoadingId(schoolId);
+    try {
+      const res = await apiService.restoreAdminSchool(schoolId);
+      if (res?.success) {
+        addToast?.('School Restored', res.message, 'emerald');
+        await loadSchools();
+      } else {
+        alert(res?.message || 'Failed to restore school');
+      }
+    } catch (err) {
+      alert('Error restoring school: ' + err.message);
+    } finally {
+      setArchiveLoadingId(null);
+    }
+  };
+
+  // Open Permanent Delete Modal
+  const openDeleteSchoolModal = async (school) => {
+    setSchoolToDelete(school);
+    setDeleteConfirmCode('');
+    setDeleteSchoolModalOpen(true);
+    setDeleteInspectionLoading(true);
+    try {
+      const res = await apiService.getAdminSchoolPreDeleteInspection(school._id || school.id);
+      if (res?.success) {
+        setDeleteInspectionData(res);
+      }
+    } catch (err) {
+      console.error('Error inspecting school dependencies:', err);
+    } finally {
+      setDeleteInspectionLoading(false);
+    }
+  };
+
+  // Confirm Permanent Deletion
+  const handleConfirmDeleteSchool = async () => {
+    if (!schoolToDelete) return;
+    setIsDeletingSchool(true);
+    try {
+      const res = await apiService.deleteAdminSchool(schoolToDelete._id || schoolToDelete.id, deleteConfirmCode);
+      if (res?.success) {
+        addToast?.('School Permanently Deleted', res.message, 'rose');
+        setDeleteSchoolModalOpen(false);
+        setSchoolToDelete(null);
+        setDeleteConfirmCode('');
+        await loadSchools();
+        await loadComparison();
+      } else {
+        alert(res?.message || 'Failed to delete school');
+      }
+    } catch (err) {
+      alert('Error deleting school: ' + err.message);
+    } finally {
+      setIsDeletingSchool(false);
     }
   };
 
@@ -167,8 +409,10 @@ export const MultiSchoolManagementView = () => {
   }, []);
 
   const handleSelectSchool = (schoolId) => {
+    console.log('[DIAGNOSTIC] handleSelectSchool called with schoolId:', schoolId);
     setSelectedSchoolId(schoolId);
     loadSchoolDetail(schoolId);
+    loadAcademicConfig(schoolId);
     if (activeSection === 'performance') {
       loadPerformance(schoolId);
     }
@@ -415,14 +659,22 @@ export const MultiSchoolManagementView = () => {
       }}>
         <div className="card" style={{ padding: '1.1rem', borderRadius: '12px', border: '1px solid var(--border-default)', backgroundColor: 'var(--bg-card)' }}>
           <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>Participating Schools</div>
-          <div style={{ fontSize: '1.8rem', fontWeight: 800, color: 'var(--text-primary)', margin: '0.25rem 0' }}>{totalParticipatingSchools}</div>
-          <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>2–3 Schools Trained Weekly</div>
+          <div style={{ fontSize: '1.8rem', fontWeight: 800, color: 'var(--text-primary)', margin: '0.25rem 0' }}>
+            {schoolsError ? '—' : totalParticipatingSchools}
+          </div>
+          <div style={{ fontSize: '0.78rem', color: schoolsError ? '#EF4444' : 'var(--text-secondary)' }}>
+            {schoolsError ? `Error: ${schoolsError.code}` : '2–3 Schools Trained Weekly'}
+          </div>
         </div>
 
         <div className="card" style={{ padding: '1.1rem', borderRadius: '12px', border: '1px solid var(--border-default)', backgroundColor: 'var(--bg-card)' }}>
           <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>Total Enrolled Students</div>
-          <div style={{ fontSize: '1.8rem', fontWeight: 800, color: '#2563EB', margin: '0.25rem 0' }}>{totalStudentsEnrolled}</div>
-          <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>~20 Students per School</div>
+          <div style={{ fontSize: '1.8rem', fontWeight: 800, color: schoolsError ? 'var(--text-muted)' : '#2563EB', margin: '0.25rem 0' }}>
+            {schoolsError ? '—' : totalStudentsEnrolled}
+          </div>
+          <div style={{ fontSize: '0.78rem', color: schoolsError ? '#EF4444' : 'var(--text-secondary)' }}>
+            {schoolsError ? 'Session verification required' : '~20 Students per School'}
+          </div>
         </div>
 
         <div className="card" style={{ padding: '1.1rem', borderRadius: '12px', border: '1px solid var(--border-default)', backgroundColor: 'var(--bg-card)' }}>
@@ -451,6 +703,8 @@ export const MultiSchoolManagementView = () => {
       }}>
         {[
           { id: 'schools', label: 'Schools Directory', icon: School },
+          { id: 'students', label: 'School Students & Roster', icon: Users },
+          { id: 'academic', label: 'Academic Structure & Streams', icon: BookOpen },
           { id: 'cohorts', label: 'Cohorts & Scheduling', icon: Calendar },
           { id: 'assign', label: 'Student & Trainer Assignments', icon: UserCheck },
           { id: 'content', label: 'Cohort Content Assignment', icon: FileText },
@@ -466,6 +720,7 @@ export const MultiSchoolManagementView = () => {
               onClick={() => {
                 setActiveSection(tab.id);
                 if (tab.id === 'performance') loadPerformance(selectedSchoolId);
+                if (tab.id === 'academic') loadAcademicConfig(selectedSchoolId);
               }}
               style={{
                 display: 'flex',
@@ -493,126 +748,882 @@ export const MultiSchoolManagementView = () => {
       {/* SECTION 1: SCHOOLS DIRECTORY */}
       {activeSection === 'schools' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: '1.25rem' }}>
-            {schools.map(sch => {
-              const isSelected = (sch._id || sch.id) === selectedSchoolId;
-              return (
-                <div
-                  key={sch._id || sch.id}
-                  className="card"
-                  style={{
-                    padding: '1.25rem',
-                    borderRadius: '12px',
-                    border: isSelected ? '2px solid var(--accent-primary)' : '1px solid var(--border-default)',
-                    backgroundColor: 'var(--bg-card)',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    justifyContent: 'space-between',
-                    gap: '1rem',
-                    boxShadow: 'var(--shadow-sm)'
-                  }}
-                >
-                  <div>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.4rem' }}>
-                      <span style={{
-                        fontSize: '0.72rem',
-                        fontFamily: 'var(--font-mono)',
-                        fontWeight: 700,
-                        padding: '0.15rem 0.5rem',
-                        borderRadius: '4px',
-                        backgroundColor: 'rgba(37, 99, 235, 0.1)',
-                        color: 'var(--accent-blue)'
-                      }}>
-                        {sch.code}
-                      </span>
-                      <span style={{
-                        fontSize: '0.72rem',
-                        fontWeight: 700,
-                        padding: '0.15rem 0.5rem',
-                        borderRadius: '4px',
-                        backgroundColor: sch.status === 'active' ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)',
-                        color: sch.status === 'active' ? '#10B981' : '#EF4444'
-                      }}>
-                        {sch.status?.toUpperCase() || 'ACTIVE'}
-                      </span>
-                    </div>
+          {/* Directory Toolbar */}
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: '1rem',
+            padding: '0.75rem 1rem',
+            backgroundColor: 'var(--bg-card)',
+            borderRadius: '10px',
+            border: '1px solid var(--border-default)'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <Filter size={16} color="var(--text-muted)" />
+              <span style={{ fontSize: '0.84rem', fontWeight: 600, color: 'var(--text-secondary)' }}>Status:</span>
+              <button
+                type="button"
+                onClick={() => setDirectoryStatusFilter('active')}
+                style={{
+                  padding: '0.35rem 0.75rem',
+                  fontSize: '0.8rem',
+                  fontWeight: 600,
+                  borderRadius: '6px',
+                  border: 'none',
+                  backgroundColor: directoryStatusFilter === 'active' ? 'var(--accent-primary)' : 'var(--bg-subtle)',
+                  color: directoryStatusFilter === 'active' ? '#fff' : 'var(--text-secondary)',
+                  cursor: 'pointer'
+                }}
+              >
+                Active Only
+              </button>
+              <button
+                type="button"
+                onClick={() => setDirectoryStatusFilter('all')}
+                style={{
+                  padding: '0.35rem 0.75rem',
+                  fontSize: '0.8rem',
+                  fontWeight: 600,
+                  borderRadius: '6px',
+                  border: 'none',
+                  backgroundColor: directoryStatusFilter === 'all' ? 'var(--accent-primary)' : 'var(--bg-subtle)',
+                  color: directoryStatusFilter === 'all' ? '#fff' : 'var(--text-secondary)',
+                  cursor: 'pointer'
+                }}
+              >
+                All (incl. Archived)
+              </button>
+              <button
+                type="button"
+                onClick={() => setDirectoryStatusFilter('archived')}
+                style={{
+                  padding: '0.35rem 0.75rem',
+                  fontSize: '0.8rem',
+                  fontWeight: 600,
+                  borderRadius: '6px',
+                  border: 'none',
+                  backgroundColor: directoryStatusFilter === 'archived' ? 'var(--accent-primary)' : 'var(--bg-subtle)',
+                  color: directoryStatusFilter === 'archived' ? '#fff' : 'var(--text-secondary)',
+                  cursor: 'pointer'
+                }}
+              >
+                Archived Only
+              </button>
+            </div>
 
-                    <h3 style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--text-primary)', margin: '0 0 0.5rem 0' }}>
-                      {sch.name}
-                    </h3>
-                    <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: '0 0 1rem 0' }}>
-                      {sch.settings?.contact?.address || 'Institutional address pending'}
-                    </p>
+            <div style={{ fontSize: '0.84rem', color: 'var(--text-muted)' }}>
+              Showing {schools.filter(s => directoryStatusFilter === 'all' ? true : (directoryStatusFilter === 'archived' ? s.status === 'archived' : s.status !== 'archived')).length} school(s)
+            </div>
+          </div>
 
-                    {/* Counts breakdown */}
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.5rem', textAlign: 'center', backgroundColor: 'var(--bg-subtle)', padding: '0.65rem', borderRadius: '8px' }}>
-                      <div>
-                        <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 600 }}>Total Students</div>
-                        <div style={{ fontSize: '1.1rem', fontWeight: 800, color: 'var(--text-primary)' }}>{sch.totalStudents || 0}</div>
-                      </div>
-                      <div>
-                        <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 600 }}>Class 11 / 12</div>
-                        <div style={{ fontSize: '1rem', fontWeight: 700, color: '#2563EB' }}>
-                          {sch.class11Count || 0} / {sch.class12Count || 0}
-                        </div>
-                      </div>
-                      <div>
-                        <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 600 }}>Cohorts</div>
-                        <div style={{ fontSize: '1.1rem', fontWeight: 800, color: '#10B981' }}>{sch.batchesCount || 0}</div>
-                      </div>
-                    </div>
+          {/* Error Banner */}
+          {schoolsError && (
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '1rem 1.25rem',
+              borderRadius: '10px',
+              backgroundColor: schoolsError.code === 'INSUFFICIENT_PRIVILEGES' || schoolsError.code === 'SESSION_STALE_IDENTITY_MISMATCH'
+                ? 'rgba(245, 158, 11, 0.08)'
+                : 'rgba(239, 68, 68, 0.08)',
+              border: `1px solid ${schoolsError.code === 'INSUFFICIENT_PRIVILEGES' || schoolsError.code === 'SESSION_STALE_IDENTITY_MISMATCH' ? 'rgba(245, 158, 11, 0.3)' : 'rgba(239, 68, 68, 0.25)'}`,
+              color: schoolsError.code === 'INSUFFICIENT_PRIVILEGES' || schoolsError.code === 'SESSION_STALE_IDENTITY_MISMATCH' ? '#D97706' : '#EF4444',
+              gap: '1rem',
+              flexWrap: 'wrap'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flex: 1, minWidth: '260px' }}>
+                <AlertTriangle size={22} style={{ flexShrink: 0 }} />
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: '0.92rem' }}>
+                    {schoolsError.code === 'INSUFFICIENT_PRIVILEGES'
+                      ? 'Administrator Authorization Required (403)'
+                      : schoolsError.code === 'SESSION_STALE_IDENTITY_MISMATCH'
+                      ? 'Authentication Identity Changed (Session Stale)'
+                      : `Unable to Load Participating Schools (${schoolsError.code})`}
                   </div>
-
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', paddingTop: '0.5rem', borderTop: '1px solid var(--border-default)' }}>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        handleSelectSchool(sch._id || sch.id);
-                        setActiveSection('cohorts');
-                      }}
-                      style={{
-                        flex: 1,
-                        padding: '0.45rem',
-                        fontSize: '0.82rem',
-                        fontWeight: 600,
-                        backgroundColor: isSelected ? 'var(--accent-primary)' : 'var(--bg-card)',
-                        color: isSelected ? '#ffffff' : 'var(--text-primary)',
-                        border: '1px solid var(--border-default)',
-                        borderRadius: '6px',
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        gap: '0.3rem'
-                      }}
-                    >
-                      <Calendar size={14} /> Cohorts & Sessions
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        handleSelectSchool(sch._id || sch.id);
-                        setActiveSection('performance');
-                        loadPerformance(sch._id || sch.id);
-                      }}
-                      style={{
-                        padding: '0.45rem 0.75rem',
-                        fontSize: '0.82rem',
-                        fontWeight: 600,
-                        backgroundColor: 'var(--bg-card)',
-                        color: 'var(--text-secondary)',
-                        border: '1px solid var(--border-default)',
-                        borderRadius: '6px',
-                        cursor: 'pointer'
-                      }}
-                    >
-                      <Eye size={14} />
-                    </button>
+                  <div style={{ fontSize: '0.84rem', opacity: 0.95, marginTop: '0.15rem' }}>
+                    {schoolsError.message}
                   </div>
                 </div>
-              );
-            })}
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                {(schoolsError.code === 'INSUFFICIENT_PRIVILEGES' || schoolsError.code === 'SESSION_STALE_IDENTITY_MISMATCH') && (
+                  <button
+                    type="button"
+                    onClick={() => setLoginModalOpen?.(true)}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.4rem',
+                      padding: '0.5rem 0.95rem',
+                      borderRadius: '6px',
+                      backgroundColor: '#2563EB',
+                      color: '#fff',
+                      border: 'none',
+                      fontWeight: 700,
+                      fontSize: '0.82rem',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    <Shield size={14} /> Log In as Super Admin
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => loadSchools()}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.4rem',
+                    padding: '0.5rem 0.85rem',
+                    borderRadius: '6px',
+                    backgroundColor: schoolsError.code === 'INSUFFICIENT_PRIVILEGES' || schoolsError.code === 'SESSION_STALE_IDENTITY_MISMATCH' ? 'rgba(0,0,0,0.06)' : '#EF4444',
+                    color: schoolsError.code === 'INSUFFICIENT_PRIVILEGES' || schoolsError.code === 'SESSION_STALE_IDENTITY_MISMATCH' ? 'var(--text-primary)' : '#fff',
+                    border: '1px solid var(--border-default)',
+                    fontWeight: 600,
+                    fontSize: '0.82rem',
+                    cursor: 'pointer'
+                  }}
+                >
+                  <RefreshCw size={14} /> Retry
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Empty State */}
+          {!schoolsError && schools.filter(s => directoryStatusFilter === 'all' ? true : (directoryStatusFilter === 'archived' ? s.status === 'archived' : s.status !== 'archived')).length === 0 ? (
+            <div style={{
+              textAlign: 'center',
+              padding: '4rem 1.5rem',
+              backgroundColor: 'var(--bg-card)',
+              borderRadius: '16px',
+              border: '1px dashed var(--border-default)',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              gap: '1rem'
+            }}>
+              <div style={{
+                width: '60px',
+                height: '60px',
+                borderRadius: '50%',
+                backgroundColor: 'rgba(37, 99, 235, 0.1)',
+                color: '#2563EB',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center'
+              }}>
+                <School size={30} />
+              </div>
+              <div>
+                <h3 style={{ fontSize: '1.25rem', fontWeight: 800, margin: '0 0 0.35rem 0', color: 'var(--text-primary)' }}>
+                  {directoryStatusFilter === 'archived' ? 'No Archived Schools Found' : 'No Participating Schools Registered'}
+                </h3>
+                <p style={{ fontSize: '0.88rem', color: 'var(--text-secondary)', maxWidth: '500px', margin: 0 }}>
+                  {directoryStatusFilter === 'archived'
+                    ? 'No schools are currently archived. Active schools remain available in the directory.'
+                    : 'The multi-school directory is currently empty. Register a school to start configuring Class 11 and Class 12 groups, cohorts, and training schedules.'}
+                </p>
+              </div>
+              {isSuperAdmin && directoryStatusFilter !== 'archived' && (
+                <button
+                  type="button"
+                  onClick={() => setNewSchoolModalOpen(true)}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                    padding: '0.65rem 1.35rem',
+                    backgroundColor: 'var(--accent-primary)',
+                    color: '#fff',
+                    fontWeight: 700,
+                    borderRadius: '8px',
+                    border: 'none',
+                    cursor: 'pointer',
+                    boxShadow: '0 2px 8px rgba(37, 99, 235, 0.25)'
+                  }}
+                >
+                  <Plus size={18} /> Register First Participating School
+                </button>
+              )}
+            </div>
+          ) : (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))', gap: '1.25rem' }}>
+              {schools
+                .filter(sch => directoryStatusFilter === 'all' ? true : (directoryStatusFilter === 'archived' ? sch.status === 'archived' : sch.status !== 'archived'))
+                .map(sch => {
+                  const isSelected = (sch._id || sch.id) === selectedSchoolId;
+                  const isArchived = sch.status === 'archived';
+
+                  return (
+                    <div
+                      key={sch._id || sch.id}
+                      className="card"
+                      style={{
+                        padding: '1.25rem',
+                        borderRadius: '12px',
+                        border: isSelected ? '2px solid var(--accent-primary)' : '1px solid var(--border-default)',
+                        backgroundColor: 'var(--bg-card)',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        justifyContent: 'space-between',
+                        gap: '1rem',
+                        opacity: isArchived ? 0.75 : 1,
+                        boxShadow: 'var(--shadow-sm)'
+                      }}
+                    >
+                      <div>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                          <span style={{
+                            fontSize: '0.72rem',
+                            fontFamily: 'var(--font-mono)',
+                            fontWeight: 700,
+                            padding: '0.15rem 0.5rem',
+                            borderRadius: '4px',
+                            backgroundColor: 'rgba(37, 99, 235, 0.1)',
+                            color: 'var(--accent-blue)'
+                          }}>
+                            {sch.code}
+                          </span>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                            <span style={{
+                              fontSize: '0.72rem',
+                              fontWeight: 700,
+                              padding: '0.15rem 0.5rem',
+                              borderRadius: '4px',
+                              backgroundColor: isArchived ? 'rgba(107, 114, 128, 0.15)' : (sch.status === 'active' ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)'),
+                              color: isArchived ? '#6B7280' : (sch.status === 'active' ? '#10B981' : '#EF4444')
+                            }}>
+                              {sch.status?.toUpperCase() || 'ACTIVE'}
+                            </span>
+                            <span style={{
+                              fontSize: '0.7rem',
+                              fontWeight: 700,
+                              padding: '0.15rem 0.4rem',
+                              borderRadius: '4px',
+                              backgroundColor: 'rgba(37, 99, 235, 0.08)',
+                              color: 'var(--accent-primary)'
+                            }}>
+                              School Mode
+                            </span>
+                          </div>
+                        </div>
+
+                        <h3 style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--text-primary)', margin: '0 0 0.35rem 0' }}>
+                          {sch.name}
+                        </h3>
+                        <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: '0 0 0.85rem 0' }}>
+                          {sch.settings?.contact?.address || sch.settings?.contact?.email || 'Institutional address pending'}
+                        </p>
+
+                        {/* Counts breakdown */}
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.5rem', textAlign: 'center', backgroundColor: 'var(--bg-subtle)', padding: '0.65rem', borderRadius: '8px' }}>
+                          <div>
+                            <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', fontWeight: 600 }}>Total Students</div>
+                            <div style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--text-primary)' }}>{sch.totalStudents || 0}</div>
+                          </div>
+                          <div>
+                            <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', fontWeight: 600 }}>Class 11 / 12</div>
+                            <div style={{ fontSize: '1.05rem', fontWeight: 700, color: '#2563EB' }}>
+                              {sch.class11Count || 0} / {sch.class12Count || 0}
+                            </div>
+                          </div>
+                          <div>
+                            <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', fontWeight: 600 }}>Cohorts</div>
+                            <div style={{ fontSize: '1.15rem', fontWeight: 800, color: '#10B981' }}>{sch.batchesCount || 0}</div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Card Action Buttons */}
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', paddingTop: '0.5rem', borderTop: '1px solid var(--border-default)' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              handleSelectSchool(sch._id || sch.id);
+                              setActiveSection('students');
+                            }}
+                            style={{
+                              flex: 1,
+                              padding: '0.45rem',
+                              fontSize: '0.8rem',
+                              fontWeight: 600,
+                              backgroundColor: isSelected && activeSection === 'students' ? 'var(--accent-primary)' : 'var(--bg-card)',
+                              color: isSelected && activeSection === 'students' ? '#ffffff' : 'var(--text-primary)',
+                              border: '1px solid var(--border-default)',
+                              borderRadius: '6px',
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              gap: '0.3rem'
+                            }}
+                          >
+                            <Users size={13} /> Students
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              handleSelectSchool(sch._id || sch.id);
+                              setActiveSection('cohorts');
+                            }}
+                            style={{
+                              flex: 1,
+                              padding: '0.45rem',
+                              fontSize: '0.8rem',
+                              fontWeight: 600,
+                              backgroundColor: isSelected && activeSection === 'cohorts' ? 'var(--accent-primary)' : 'var(--bg-card)',
+                              color: isSelected && activeSection === 'cohorts' ? '#ffffff' : 'var(--text-primary)',
+                              border: '1px solid var(--border-default)',
+                              borderRadius: '6px',
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              gap: '0.3rem'
+                            }}
+                          >
+                            <Calendar size={13} /> Cohorts
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              handleSelectSchool(sch._id || sch.id);
+                              setActiveSection('academic');
+                              loadAcademicConfig(sch._id || sch.id);
+                            }}
+                            style={{
+                              flex: 1,
+                              padding: '0.45rem',
+                              fontSize: '0.8rem',
+                              fontWeight: 600,
+                              backgroundColor: 'var(--bg-card)',
+                              color: 'var(--text-primary)',
+                              border: '1px solid var(--border-default)',
+                              borderRadius: '6px',
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              gap: '0.3rem'
+                            }}
+                          >
+                            <BookOpen size={13} /> Streams & Config
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              handleSelectSchool(sch._id || sch.id);
+                              setActiveSection('performance');
+                              loadPerformance(sch._id || sch.id);
+                            }}
+                            title="View School Performance & Dossier"
+                            style={{
+                              padding: '0.45rem 0.65rem',
+                              fontSize: '0.8rem',
+                              backgroundColor: 'var(--bg-card)',
+                              color: 'var(--text-secondary)',
+                              border: '1px solid var(--border-default)',
+                              borderRadius: '6px',
+                              cursor: 'pointer'
+                            }}
+                          >
+                            <Eye size={13} />
+                          </button>
+                        </div>
+
+                        {/* Admin Security Actions: Archive & Delete */}
+                        {isSuperAdmin && (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', borderTop: '1px dashed var(--border-default)', paddingTop: '0.4rem' }}>
+                            {isArchived ? (
+                              <button
+                                type="button"
+                                disabled={archiveLoadingId === (sch._id || sch.id)}
+                                onClick={() => handleRestoreSchool(sch._id || sch.id)}
+                                style={{
+                                  flex: 1,
+                                  padding: '0.35rem',
+                                  fontSize: '0.76rem',
+                                  fontWeight: 600,
+                                  backgroundColor: 'rgba(16, 185, 129, 0.08)',
+                                  color: '#10B981',
+                                  border: '1px solid rgba(16, 185, 129, 0.25)',
+                                  borderRadius: '5px',
+                                  cursor: 'pointer',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  gap: '0.3rem'
+                                }}
+                              >
+                                <RefreshCw size={12} /> Restore School
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                disabled={archiveLoadingId === (sch._id || sch.id)}
+                                onClick={() => handleArchiveSchool(sch._id || sch.id)}
+                                style={{
+                                  flex: 1,
+                                  padding: '0.35rem',
+                                  fontSize: '0.76rem',
+                                  fontWeight: 600,
+                                  backgroundColor: 'rgba(107, 114, 128, 0.08)',
+                                  color: 'var(--text-secondary)',
+                                  border: '1px solid var(--border-default)',
+                                  borderRadius: '5px',
+                                  cursor: 'pointer',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  gap: '0.3rem'
+                                }}
+                              >
+                                <Archive size={12} /> Archive School
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => openDeleteSchoolModal(sch)}
+                              style={{
+                                padding: '0.35rem 0.65rem',
+                                fontSize: '0.76rem',
+                                fontWeight: 600,
+                                backgroundColor: 'rgba(239, 68, 68, 0.08)',
+                                color: '#EF4444',
+                                border: '1px solid rgba(239, 68, 68, 0.25)',
+                                borderRadius: '5px',
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '0.3rem'
+                              }}
+                            >
+                              <Trash2 size={12} /> Delete
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* SECTION: SCHOOL STUDENTS & ROSTER */}
+      {activeSection === 'students' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+          {/* School Selector Header */}
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: '1rem',
+            padding: '1rem 1.25rem',
+            backgroundColor: 'var(--bg-card)',
+            borderRadius: '12px',
+            border: '1px solid var(--border-default)'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+              <School size={20} color="var(--accent-blue)" />
+              <label style={{ fontSize: '0.88rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+                Managing Student Roster for School:
+              </label>
+              <select
+                value={selectedSchoolId}
+                onChange={(e) => handleSelectSchool(e.target.value)}
+                style={{
+                  padding: '0.45rem 0.85rem',
+                  fontSize: '0.86rem',
+                  borderRadius: '8px',
+                  border: '1px solid var(--border-default)',
+                  backgroundColor: 'var(--bg-input)',
+                  color: 'var(--text-primary)',
+                  fontWeight: 600
+                }}
+              >
+                {schools.map(sch => (
+                  <option key={sch._id || sch.id} value={sch._id || sch.id}>
+                    {sch.name} ({sch.code}) {sch.status === 'archived' ? '[Archived]' : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {selectedSchool && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <span style={{
+                  fontSize: '0.74rem',
+                  fontWeight: 700,
+                  padding: '0.2rem 0.6rem',
+                  borderRadius: '20px',
+                  backgroundColor: 'rgba(37, 99, 235, 0.1)',
+                  color: 'var(--accent-primary)'
+                }}>
+                  School Mode
+                </span>
+                <span style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
+                  Code: <strong>{selectedSchool.code}</strong>
+                </span>
+              </div>
+            )}
           </div>
+
+          {(() => {
+            console.log('[DIAGNOSTIC] before rendering student management:', {
+              selectedTenantId: selectedSchool?._id || selectedSchoolId,
+              institutionType: selectedSchool?.institutionType || 'school',
+              schoolName: selectedSchool?.name,
+              source: 'MultiSchoolManagementView -> activeSection === students'
+            });
+            return (
+              <StudentsDataSheetView
+                selectedSchool={selectedSchool}
+                institutionType={selectedSchool?.institutionType || 'school'}
+                collegeId={selectedSchool?._id || selectedSchoolId}
+                isSuperAdmin={isSuperAdmin}
+                key={`school-students-${selectedSchool?._id || selectedSchoolId}`}
+              />
+            );
+          })()}
+        </div>
+      )}
+
+      {/* SECTION: ACADEMIC STRUCTURE & STREAMS SETTINGS */}
+      {activeSection === 'academic' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+          {/* School Selector Header */}
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: '1rem',
+            padding: '1rem 1.25rem',
+            backgroundColor: 'var(--bg-card)',
+            borderRadius: '12px',
+            border: '1px solid var(--border-default)'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+              <BookOpen size={20} color="var(--accent-blue)" />
+              <label style={{ fontSize: '0.88rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+                Configuring Academic Structure for:
+              </label>
+              <select
+                value={selectedSchoolId}
+                onChange={(e) => handleSelectSchool(e.target.value)}
+                style={{
+                  padding: '0.45rem 0.85rem',
+                  fontSize: '0.86rem',
+                  borderRadius: '8px',
+                  border: '1px solid var(--border-default)',
+                  backgroundColor: 'var(--bg-input)',
+                  color: 'var(--text-primary)',
+                  fontWeight: 600
+                }}
+              >
+                {schools.map(sch => (
+                  <option key={sch._id || sch.id} value={sch._id || sch.id}>
+                    {sch.name} ({sch.code}) {sch.status === 'archived' ? '[Archived]' : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {selectedSchool && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <span style={{
+                  fontSize: '0.76rem',
+                  fontWeight: 700,
+                  padding: '0.2rem 0.6rem',
+                  borderRadius: '6px',
+                  backgroundColor: 'rgba(37, 99, 235, 0.1)',
+                  color: 'var(--accent-primary)'
+                }}>
+                  Session: {academicConfigData.academicSession || '2026-2027'}
+                </span>
+                {isSuperAdmin && (
+                  <button
+                    type="button"
+                    onClick={() => openDeleteSchoolModal(selectedSchool)}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.35rem',
+                      padding: '0.4rem 0.75rem',
+                      fontSize: '0.78rem',
+                      fontWeight: 600,
+                      backgroundColor: 'rgba(239, 68, 68, 0.08)',
+                      color: '#EF4444',
+                      border: '1px solid rgba(239, 68, 68, 0.25)',
+                      borderRadius: '6px',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    <Trash2 size={13} /> Delete School
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Academic Settings Form */}
+          {academicConfigLoading ? (
+            <div style={{ padding: '3rem', textAlign: 'center', color: 'var(--text-muted)' }}>
+              Loading academic configuration...
+            </div>
+          ) : (
+            <form onSubmit={handleSaveAcademicConfig} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+                gap: '1.25rem',
+                backgroundColor: 'var(--bg-card)',
+                padding: '1.5rem',
+                borderRadius: '12px',
+                border: '1px solid var(--border-default)'
+              }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, marginBottom: '0.4rem', color: 'var(--text-primary)' }}>
+                    Academic Session * (e.g. 2026-2027)
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={academicConfigData.academicSession || ''}
+                    onChange={(e) => setAcademicConfigData({ ...academicConfigData, academicSession: e.target.value })}
+                    style={{ width: '100%', padding: '0.55rem', borderRadius: '6px', border: '1px solid var(--border-default)', backgroundColor: 'var(--bg-input)', color: 'var(--text-primary)' }}
+                  />
+                  <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Sets the current active school academic year</span>
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, marginBottom: '0.4rem', color: 'var(--text-primary)' }}>
+                    Classes Offered
+                  </label>
+                  <div style={{ display: 'flex', gap: '1rem', marginTop: '0.5rem' }}>
+                    {['Class 11', 'Class 12'].map(cls => {
+                      const checked = (academicConfigData.classesOffered || []).includes(cls);
+                      return (
+                        <label key={cls} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-primary)', cursor: 'pointer' }}>
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={(e) => {
+                              const curr = academicConfigData.classesOffered || [];
+                              const updated = e.target.checked
+                                ? [...curr, cls]
+                                : curr.filter(c => c !== cls);
+                              setAcademicConfigData({ ...academicConfigData, classesOffered: updated });
+                            }}
+                          />
+                          {cls}
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, marginBottom: '0.4rem', color: 'var(--text-primary)' }}>
+                    Class Sections (comma-separated)
+                  </label>
+                  <input
+                    type="text"
+                    value={(academicConfigData.sections || []).join(', ')}
+                    onChange={(e) => {
+                      const secs = e.target.value.split(',').map(s => s.trim().toUpperCase()).filter(Boolean);
+                      setAcademicConfigData({ ...academicConfigData, sections: secs });
+                    }}
+                    placeholder="A, B, C"
+                    style={{ width: '100%', padding: '0.55rem', borderRadius: '6px', border: '1px solid var(--border-default)', backgroundColor: 'var(--bg-input)', color: 'var(--text-primary)' }}
+                  />
+                  <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>e.g. A, B, C</span>
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, marginBottom: '0.4rem', color: 'var(--text-primary)' }}>
+                    Medium of Instruction (comma-separated)
+                  </label>
+                  <input
+                    type="text"
+                    value={(academicConfigData.mediums || []).join(', ')}
+                    onChange={(e) => {
+                      const meds = e.target.value.split(',').map(m => m.trim()).filter(Boolean);
+                      setAcademicConfigData({ ...academicConfigData, mediums: meds });
+                    }}
+                    placeholder="English, Tamil"
+                    style={{ width: '100%', padding: '0.55rem', borderRadius: '6px', border: '1px solid var(--border-default)', backgroundColor: 'var(--bg-input)', color: 'var(--text-primary)' }}
+                  />
+                </div>
+
+                <div style={{ gridColumn: '1 / -1' }}>
+                  <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, marginBottom: '0.4rem', color: 'var(--text-primary)' }}>
+                    Specialized Training Subjects (comma-separated)
+                  </label>
+                  <input
+                    type="text"
+                    value={(academicConfigData.trainingSubjects || []).join(', ')}
+                    onChange={(e) => {
+                      const subs = e.target.value.split(',').map(s => s.trim()).filter(Boolean);
+                      setAcademicConfigData({ ...academicConfigData, trainingSubjects: subs });
+                    }}
+                    placeholder="Python Programming, Aptitude & Logical Reasoning, Soft Skills"
+                    style={{ width: '100%', padding: '0.55rem', borderRadius: '6px', border: '1px solid var(--border-default)', backgroundColor: 'var(--bg-input)', color: 'var(--text-primary)' }}
+                  />
+                  <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Subjects delivered by 6th Civilians / EdWth Academy trainers</span>
+                </div>
+              </div>
+
+              {/* Dynamic Academic Groups & Streams Section */}
+              <div style={{
+                backgroundColor: 'var(--bg-card)',
+                padding: '1.5rem',
+                borderRadius: '12px',
+                border: '1px solid var(--border-default)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '1rem'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem' }}>
+                  <div>
+                    <h4 style={{ fontSize: '1.05rem', fontWeight: 800, margin: '0 0 0.2rem 0', color: 'var(--text-primary)' }}>
+                      Academic Groups & Streams
+                    </h4>
+                    <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', margin: 0 }}>
+                      Define stream groupings (e.g. MPC, BPC, Pure Science, Commerce) and their associated core subjects.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setNewGroupModalOpen(true)}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.4rem',
+                      padding: '0.5rem 0.9rem',
+                      fontSize: '0.82rem',
+                      fontWeight: 700,
+                      backgroundColor: 'rgba(37, 99, 235, 0.1)',
+                      color: 'var(--accent-primary)',
+                      border: '1px solid rgba(37, 99, 235, 0.25)',
+                      borderRadius: '6px',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    <Plus size={15} /> Add Stream Group
+                  </button>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1rem' }}>
+                  {(academicConfigData.groups || []).map(group => (
+                    <div
+                      key={group.id}
+                      style={{
+                        padding: '1rem',
+                        borderRadius: '8px',
+                        border: '1px solid var(--border-default)',
+                        backgroundColor: 'var(--bg-subtle)',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        justifyContent: 'space-between',
+                        gap: '0.75rem'
+                      }}
+                    >
+                      <div>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.3rem' }}>
+                          <span style={{ fontSize: '0.92rem', fontWeight: 800, color: 'var(--text-primary)' }}>
+                            {group.name}
+                          </span>
+                          <span style={{
+                            fontSize: '0.68rem',
+                            fontWeight: 700,
+                            padding: '0.1rem 0.4rem',
+                            borderRadius: '4px',
+                            backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                            color: '#10B981'
+                          }}>
+                            {group.stream || 'Stream'}
+                          </span>
+                        </div>
+                        {group.description && (
+                          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.5rem' }}>
+                            {group.description}
+                          </div>
+                        )}
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.3rem' }}>
+                          {(group.subjects || []).map(subj => (
+                            <span
+                              key={subj}
+                              style={{
+                                fontSize: '0.7rem',
+                                padding: '0.15rem 0.45rem',
+                                borderRadius: '4px',
+                                backgroundColor: 'var(--bg-card)',
+                                border: '1px solid var(--border-default)',
+                                color: 'var(--text-secondary)'
+                              }}
+                            >
+                              {subj}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveGroup(group.id)}
+                          style={{
+                            padding: '0.25rem 0.5rem',
+                            fontSize: '0.72rem',
+                            color: '#EF4444',
+                            border: 'none',
+                            backgroundColor: 'transparent',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.2rem'
+                          }}
+                        >
+                          <Trash2 size={12} /> Remove
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Submit Button */}
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '1rem' }}>
+                <button
+                  type="submit"
+                  disabled={isSavingAcademicConfig}
+                  style={{
+                    padding: '0.65rem 1.5rem',
+                    fontSize: '0.88rem',
+                    fontWeight: 700,
+                    backgroundColor: 'var(--accent-primary)',
+                    color: '#ffffff',
+                    border: 'none',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    boxShadow: '0 2px 8px rgba(37, 99, 235, 0.25)'
+                  }}
+                >
+                  {isSavingAcademicConfig ? 'Saving Academic Structure...' : 'Save Academic Structure'}
+                </button>
+              </div>
+            </form>
+          )}
         </div>
       )}
 
@@ -1316,19 +2327,43 @@ export const MultiSchoolManagementView = () => {
             backgroundColor: 'var(--bg-card)',
             borderRadius: '12px',
             border: '1px solid var(--border-default)',
-            maxWidth: '500px',
+            maxWidth: '520px',
             width: '100%',
             padding: '1.5rem',
             boxShadow: 'var(--shadow-lg)'
           }}>
-            <h3 style={{ fontSize: '1.2rem', fontWeight: 800, margin: '0 0 0.5rem 0', color: 'var(--text-primary)' }}>
-              Register Participating School
-            </h3>
-            <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', margin: '0 0 1.25rem 0' }}>
-              Create a dedicated institutional tenant for a participating school.
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.4rem' }}>
+              <h3 style={{ fontSize: '1.2rem', fontWeight: 800, margin: 0, color: 'var(--text-primary)' }}>
+                Register Participating School
+              </h3>
+              <span style={{
+                fontSize: '0.72rem',
+                fontWeight: 700,
+                padding: '0.15rem 0.5rem',
+                borderRadius: '4px',
+                backgroundColor: 'rgba(37, 99, 235, 0.1)',
+                color: 'var(--accent-primary)'
+              }}>
+                School Mode
+              </span>
+            </div>
+            <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', margin: '0 0 1rem 0' }}>
+              Create a dedicated institutional tenant operating strictly in School Mode (Classes 11 & 12).
             </p>
 
-            <form onSubmit={handleCreateSchool} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+            <div style={{
+              padding: '0.65rem 0.85rem',
+              backgroundColor: 'rgba(16, 185, 129, 0.08)',
+              border: '1px solid rgba(16, 185, 129, 0.2)',
+              borderRadius: '8px',
+              fontSize: '0.76rem',
+              color: 'var(--text-secondary)',
+              marginBottom: '1rem'
+            }}>
+              <strong>Standard Setup:</strong> Automatically pre-configured with Class 11 & 12, standard science/commerce streams (MPC, BPC, Pure Science, Commerce), and specialized training modules.
+            </div>
+
+            <form onSubmit={handleCreateSchool} style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
               <div>
                 <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, marginBottom: '0.3rem', color: 'var(--text-primary)' }}>
                   School Name *
@@ -1336,38 +2371,69 @@ export const MultiSchoolManagementView = () => {
                 <input
                   type="text"
                   required
-                  placeholder="e.g. Oakridge International School"
+                  placeholder="e.g. Horizon Senior Secondary School"
                   value={newSchoolData.name}
                   onChange={(e) => setNewSchoolData({ ...newSchoolData, name: e.target.value })}
                   style={{ width: '100%', padding: '0.55rem', borderRadius: '6px', border: '1px solid var(--border-default)', backgroundColor: 'var(--bg-input)', color: 'var(--text-primary)' }}
                 />
               </div>
 
-              <div>
-                <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, marginBottom: '0.3rem', color: 'var(--text-primary)' }}>
-                  School Code * (e.g. OAKRIDGE-HYD)
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. OAK-01"
-                  value={newSchoolData.code}
-                  onChange={(e) => setNewSchoolData({ ...newSchoolData, code: e.target.value.toUpperCase() })}
-                  style={{ width: '100%', padding: '0.55rem', borderRadius: '6px', border: '1px solid var(--border-default)', backgroundColor: 'var(--bg-input)', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}
-                />
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, marginBottom: '0.3rem', color: 'var(--text-primary)' }}>
+                    School Code * (e.g. HOR-01)
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. HOR-01"
+                    value={newSchoolData.code}
+                    onChange={(e) => setNewSchoolData({ ...newSchoolData, code: e.target.value.toUpperCase() })}
+                    style={{ width: '100%', padding: '0.55rem', borderRadius: '6px', border: '1px solid var(--border-default)', backgroundColor: 'var(--bg-input)', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, marginBottom: '0.3rem', color: 'var(--text-primary)' }}>
+                    Academic Session *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="2026-2027"
+                    value={newSchoolData.academicSession || '2026-2027'}
+                    onChange={(e) => setNewSchoolData({ ...newSchoolData, academicSession: e.target.value })}
+                    style={{ width: '100%', padding: '0.55rem', borderRadius: '6px', border: '1px solid var(--border-default)', backgroundColor: 'var(--bg-input)', color: 'var(--text-primary)' }}
+                  />
+                </div>
               </div>
 
-              <div>
-                <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, marginBottom: '0.3rem', color: 'var(--text-primary)' }}>
-                  Administrative Contact Email
-                </label>
-                <input
-                  type="email"
-                  placeholder="admin@oakridge.edu"
-                  value={newSchoolData.contactEmail}
-                  onChange={(e) => setNewSchoolData({ ...newSchoolData, contactEmail: e.target.value })}
-                  style={{ width: '100%', padding: '0.55rem', borderRadius: '6px', border: '1px solid var(--border-default)', backgroundColor: 'var(--bg-input)', color: 'var(--text-primary)' }}
-                />
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, marginBottom: '0.3rem', color: 'var(--text-primary)' }}>
+                    Contact Email
+                  </label>
+                  <input
+                    type="email"
+                    placeholder="admin@school.org"
+                    value={newSchoolData.contactEmail}
+                    onChange={(e) => setNewSchoolData({ ...newSchoolData, contactEmail: e.target.value })}
+                    style={{ width: '100%', padding: '0.55rem', borderRadius: '6px', border: '1px solid var(--border-default)', backgroundColor: 'var(--bg-input)', color: 'var(--text-primary)' }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, marginBottom: '0.3rem', color: 'var(--text-primary)' }}>
+                    Contact Phone
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="+91 9876543210"
+                    value={newSchoolData.contactPhone || ''}
+                    onChange={(e) => setNewSchoolData({ ...newSchoolData, contactPhone: e.target.value })}
+                    style={{ width: '100%', padding: '0.55rem', borderRadius: '6px', border: '1px solid var(--border-default)', backgroundColor: 'var(--bg-input)', color: 'var(--text-primary)' }}
+                  />
+                </div>
               </div>
 
               <div>
@@ -1567,6 +2633,272 @@ export const MultiSchoolManagementView = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: Add New Academic Stream Group */}
+      {newGroupModalOpen && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 9999,
+          padding: '1rem'
+        }}>
+          <div style={{
+            backgroundColor: 'var(--bg-card)',
+            borderRadius: '12px',
+            border: '1px solid var(--border-default)',
+            maxWidth: '500px',
+            width: '100%',
+            padding: '1.5rem',
+            boxShadow: 'var(--shadow-lg)'
+          }}>
+            <h3 style={{ fontSize: '1.2rem', fontWeight: 800, margin: '0 0 0.4rem 0', color: 'var(--text-primary)' }}>
+              Add Academic Stream / Group
+            </h3>
+            <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', margin: '0 0 1rem 0' }}>
+              Define a new subject combination offered at this school for Class 11 and Class 12.
+            </p>
+
+            <form onSubmit={handleAddGroupSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '0.9rem' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, marginBottom: '0.3rem', color: 'var(--text-primary)' }}>
+                  Group Name * (e.g. Group I (MPC), Pure Science, Commerce)
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Group I (MPC)"
+                  value={newGroupForm.name}
+                  onChange={(e) => setNewGroupForm({ ...newGroupForm, name: e.target.value })}
+                  style={{ width: '100%', padding: '0.55rem', borderRadius: '6px', border: '1px solid var(--border-default)', backgroundColor: 'var(--bg-input)', color: 'var(--text-primary)' }}
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, marginBottom: '0.3rem', color: 'var(--text-primary)' }}>
+                  Stream Category
+                </label>
+                <select
+                  value={newGroupForm.stream}
+                  onChange={(e) => setNewGroupForm({ ...newGroupForm, stream: e.target.value })}
+                  style={{ width: '100%', padding: '0.55rem', borderRadius: '6px', border: '1px solid var(--border-default)', backgroundColor: 'var(--bg-input)', color: 'var(--text-primary)' }}
+                >
+                  <option value="Science">Science</option>
+                  <option value="Commerce">Commerce</option>
+                  <option value="Arts / Humanities">Arts / Humanities</option>
+                  <option value="Vocational">Vocational</option>
+                </select>
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, marginBottom: '0.3rem', color: 'var(--text-primary)' }}>
+                  Core Subjects (comma-separated) *
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Mathematics, Physics, Chemistry"
+                  value={newGroupForm.subjects}
+                  onChange={(e) => setNewGroupForm({ ...newGroupForm, subjects: e.target.value })}
+                  style={{ width: '100%', padding: '0.55rem', borderRadius: '6px', border: '1px solid var(--border-default)', backgroundColor: 'var(--bg-input)', color: 'var(--text-primary)' }}
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, marginBottom: '0.3rem', color: 'var(--text-primary)' }}>
+                  Brief Description
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. Maths, Physics, Chemistry stream"
+                  value={newGroupForm.description}
+                  onChange={(e) => setNewGroupForm({ ...newGroupForm, description: e.target.value })}
+                  style={{ width: '100%', padding: '0.55rem', borderRadius: '6px', border: '1px solid var(--border-default)', backgroundColor: 'var(--bg-input)', color: 'var(--text-primary)' }}
+                />
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '0.5rem' }}>
+                <button
+                  type="button"
+                  onClick={() => setNewGroupModalOpen(false)}
+                  style={{ padding: '0.55rem 1rem', fontSize: '0.84rem', fontWeight: 600, border: '1px solid var(--border-default)', borderRadius: '6px', backgroundColor: 'transparent', color: 'var(--text-secondary)', cursor: 'pointer' }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  style={{ padding: '0.55rem 1.25rem', fontSize: '0.84rem', fontWeight: 700, backgroundColor: 'var(--accent-primary)', color: '#ffffff', border: 'none', borderRadius: '6px', cursor: 'pointer' }}
+                >
+                  Add Stream Group
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: Permanently Delete School Confirmation */}
+      {deleteSchoolModalOpen && schoolToDelete && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.65)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 9999,
+          padding: '1rem'
+        }}>
+          <div style={{
+            backgroundColor: 'var(--bg-card)',
+            borderRadius: '14px',
+            border: '1px solid rgba(239, 68, 68, 0.3)',
+            maxWidth: '540px',
+            width: '100%',
+            padding: '1.75rem',
+            boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.4)'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', color: '#EF4444', marginBottom: '0.75rem' }}>
+              <div style={{
+                width: '40px',
+                height: '40px',
+                borderRadius: '50%',
+                backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center'
+              }}>
+                <AlertTriangle size={22} />
+              </div>
+              <div>
+                <h3 style={{ fontSize: '1.25rem', fontWeight: 800, margin: 0, color: 'var(--text-primary)' }}>
+                  Permanently Delete School
+                </h3>
+                <span style={{ fontSize: '0.78rem', color: '#EF4444', fontWeight: 700 }}>
+                  Irreversible Production Purge
+                </span>
+              </div>
+            </div>
+
+            <p style={{ fontSize: '0.86rem', color: 'var(--text-secondary)', margin: '0 0 1rem 0' }}>
+              You are about to permanently delete <strong>{schoolToDelete.name}</strong> ({schoolToDelete.code}).
+            </p>
+
+            {/* Inspection Breakdown */}
+            <div style={{
+              backgroundColor: 'var(--bg-subtle)',
+              border: '1px solid var(--border-default)',
+              borderRadius: '8px',
+              padding: '1rem',
+              marginBottom: '1rem'
+            }}>
+              <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '0.5rem' }}>
+                Affected Scoped Records in Database:
+              </div>
+              {deleteInspectionLoading ? (
+                <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                  Inspecting school dependencies...
+                </div>
+              ) : (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '0.4rem', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                  <div>Enrolled Students: <strong>{deleteInspectionData?.counts?.students || 0}</strong></div>
+                  <div>Training Cohorts: <strong>{deleteInspectionData?.counts?.cohorts || 0}</strong></div>
+                  <div>Attendance Marks: <strong>{deleteInspectionData?.counts?.attendanceRecords || 0}</strong></div>
+                  <div>Submissions: <strong>{deleteInspectionData?.counts?.submissions || 0}</strong></div>
+                  <div>Assignments: <strong>{deleteInspectionData?.counts?.assignments || 0}</strong></div>
+                  <div>Total Scoped Records: <strong>{deleteInspectionData?.counts?.totalRecords || 0}</strong></div>
+                </div>
+              )}
+            </div>
+
+            <div style={{
+              backgroundColor: 'rgba(239, 68, 68, 0.08)',
+              border: '1px solid rgba(239, 68, 68, 0.2)',
+              borderRadius: '8px',
+              padding: '0.75rem',
+              fontSize: '0.76rem',
+              color: 'var(--text-secondary)',
+              marginBottom: '1.25rem'
+            }}>
+              <strong>Safety Enforcement:</strong> A scoped JSON backup will automatically be archived to <code>server/scripts/backups/</code> prior to purge. Platform SuperAdmin accounts and global security policies will NOT be touched.
+            </div>
+
+            <div style={{ marginBottom: '1.25rem' }}>
+              <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, marginBottom: '0.4rem', color: 'var(--text-primary)' }}>
+                Type <span style={{ color: '#EF4444', fontFamily: 'var(--font-mono)' }}>{schoolToDelete.code}</span> to confirm permanent deletion:
+              </label>
+              <input
+                type="text"
+                placeholder={schoolToDelete.code}
+                value={deleteConfirmCode}
+                onChange={(e) => setDeleteConfirmCode(e.target.value.toUpperCase())}
+                style={{
+                  width: '100%',
+                  padding: '0.6rem',
+                  borderRadius: '6px',
+                  border: '1px solid var(--border-default)',
+                  backgroundColor: 'var(--bg-input)',
+                  color: 'var(--text-primary)',
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: '0.9rem',
+                  fontWeight: 700
+                }}
+              />
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '0.75rem' }}>
+              <button
+                type="button"
+                disabled={isDeletingSchool}
+                onClick={() => {
+                  setDeleteSchoolModalOpen(false);
+                  setSchoolToDelete(null);
+                  setDeleteConfirmCode('');
+                }}
+                style={{
+                  padding: '0.6rem 1.1rem',
+                  fontSize: '0.84rem',
+                  fontWeight: 600,
+                  border: '1px solid var(--border-default)',
+                  borderRadius: '6px',
+                  backgroundColor: 'transparent',
+                  color: 'var(--text-secondary)',
+                  cursor: 'pointer'
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={deleteConfirmCode.trim() !== schoolToDelete.code || isDeletingSchool}
+                onClick={handleConfirmDeleteSchool}
+                style={{
+                  padding: '0.6rem 1.25rem',
+                  fontSize: '0.84rem',
+                  fontWeight: 700,
+                  backgroundColor: deleteConfirmCode.trim() === schoolToDelete.code ? '#EF4444' : 'rgba(239, 68, 68, 0.4)',
+                  color: '#ffffff',
+                  border: 'none',
+                  borderRadius: '6px',
+                  cursor: deleteConfirmCode.trim() === schoolToDelete.code && !isDeletingSchool ? 'pointer' : 'not-allowed',
+                  boxShadow: deleteConfirmCode.trim() === schoolToDelete.code ? '0 2px 8px rgba(239, 68, 68, 0.35)' : 'none'
+                }}
+              >
+                {isDeletingSchool ? 'Purging Records...' : 'Permanently Delete School'}
+              </button>
+            </div>
           </div>
         </div>
       )}

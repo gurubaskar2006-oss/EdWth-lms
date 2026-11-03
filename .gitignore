@@ -11,6 +11,12 @@ node_modules/
 .env.production.local
 server/.env
 *.env
+.env.*
+.env.staging
+server/.env.staging
+!.env.example
+!server/.env.example
+!**/.env.example
 
 # Build outputs
 dist/
@@ -40,3 +46,20 @@ Thumbs.db
 
 # Scratch and temporary scripts
 scratch/
+
+# Staging database storage
+.staging_mongo_data
+.staging_mongo_data/
+server/.staging_mongo_data
+server/.staging_mongo_data/
+
+# Database dumps and operational backups
+server/scripts/backups/
+backups/
+*.dump
+
+# Ad-hoc local test scripts and reports
+/scripts/
+remediation_report.md
+
+

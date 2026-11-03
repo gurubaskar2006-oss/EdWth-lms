@@ -24,8 +24,8 @@ const teacherNoteSchema = new mongoose.Schema({
   timestamps: true
 });
 
-// Ensure efficient querying and tenant isolation per student
-teacherNoteSchema.index({ tenantId: 1, studentId: 1 });
+// Ensure efficient querying, tenant isolation, and single note per student
+teacherNoteSchema.index({ tenantId: 1, studentId: 1 }, { unique: true });
 
 const TeacherNote = mongoose.models.TeacherNote || mongoose.model('TeacherNote', teacherNoteSchema);
 

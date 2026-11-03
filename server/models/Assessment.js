@@ -75,7 +75,7 @@ const assessmentSchema = new mongoose.Schema({
     id: { type: String, required: true },
     type: { type: String, enum: ['mcq', 'coding', 'sql', 'descriptive'], default: 'coding' },
     title: { type: String, default: '' },
-    prompt: { type: String, required: true },
+    prompt: { type: String, default: '' },
     language: { type: String, default: 'python' },
     options: [{ type: String }],
     correctAnswer: { type: mongoose.Schema.Types.Mixed, default: null },

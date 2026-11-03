@@ -262,9 +262,11 @@ describe('Lumina Multi-Node Safe Attendance Suite', () => {
   });
 
   describe('6. Production Fail-Closed Resilience', () => {
-    it('should strictly throw AttendanceServiceUnavailableError in production when Redis is null', async () => {
+    it('should strictly throw AttendanceServiceUnavailableError when REQUIRE_REDIS=true and Redis is null', async () => {
       const originalEnv = process.env.NODE_ENV;
+      const originalRequireRedis = process.env.REQUIRE_REDIS;
       process.env.NODE_ENV = 'production';
+      process.env.REQUIRE_REDIS = 'true';
       // Simulate Redis disconnect / null client
       setRedisClientOverride(null);
 
@@ -286,6 +288,11 @@ describe('Lumina Multi-Node Safe Attendance Suite', () => {
         ).rejects.toThrow(AttendanceServiceUnavailableError);
       } finally {
         process.env.NODE_ENV = originalEnv;
+        if (originalRequireRedis !== undefined) {
+          process.env.REQUIRE_REDIS = originalRequireRedis;
+        } else {
+          delete process.env.REQUIRE_REDIS;
+        }
       }
     });
   });

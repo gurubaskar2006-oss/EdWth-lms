@@ -28,12 +28,13 @@ export const ScheduleView = ({ onOpenAddEvent }) => {
   // Calendar View Mode: 'month', 'week', 'agenda'
   const [calendarView, setCalendarView] = useState('month');
 
-  // Month navigation (Defaults to August 2026 for academic term context)
-  const [currentYear, setCurrentYear] = useState(2026);
-  const [currentMonth, setCurrentMonth] = useState(7); // 0-indexed: 7 = August
+  // Month navigation (Defaults to current calendar date)
+  const today = new Date();
+  const [currentYear, setCurrentYear] = useState(() => today.getFullYear());
+  const [currentMonth, setCurrentMonth] = useState(() => today.getMonth());
 
   // Selected Day & Active Event for Contextual Drawer
-  const [selectedDateStr, setSelectedDateStr] = useState('2026-08-15');
+  const [selectedDateStr, setSelectedDateStr] = useState(() => today.toISOString().split('T')[0]);
   const [activeEventDetail, setActiveEventDetail] = useState(null);
 
   const monthNames = [

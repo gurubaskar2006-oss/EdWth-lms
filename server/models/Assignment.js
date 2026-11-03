@@ -50,5 +50,6 @@ const assignmentSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 assignmentSchema.index({ tenantId: 1, courseId: 1 });
+assignmentSchema.index({ tenantId: 1, batchId: 1, title: 1 });
 
 export default mongoose.model('Assignment', assignmentSchema);

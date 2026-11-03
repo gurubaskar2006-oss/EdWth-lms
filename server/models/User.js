@@ -21,12 +21,16 @@ const userSchema = new mongoose.Schema({
   },
   role: {
     type: String,
-    enum: ['student', 'trainer', 'admin', 'superadmin'],
+    enum: ['student', 'trainer', 'teacher', 'admin', 'superadmin'],
     default: 'student'
   },
   batchId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Batch',
+    default: null
+  },
+  batch: {
+    type: String,
     default: null
   },
   tenantId: {
@@ -47,6 +51,16 @@ const userSchema = new mongoose.Schema({
     default: false
   },
   mustChangePassword: {
+    type: Boolean,
+    default: false
+  },
+  securityEmail: {
+    type: String,
+    lowercase: true,
+    trim: true,
+    default: null
+  },
+  isSecurityEmailVerified: {
     type: Boolean,
     default: false
   },
@@ -81,6 +95,28 @@ const userSchema = new mongoose.Schema({
   year: String,
   className: String,
   schoolName: String,
+  // School-specific student profile fields
+  standard: String,
+  group: String,
+  section: String,
+  rollNumber: String,
+  medium: String,
+  parentName: String,
+  parentPhone: String,
+  dob: String,
+  gender: String,
+  schoolProfile: {
+    academicYear: String,
+    standard: String,
+    group: String,
+    section: String,
+    rollNumber: String,
+    medium: String,
+    parentName: String,
+    parentPhone: String,
+    gender: String,
+    dob: String
+  },
   streakDays: {
     type: Number,
     default: 0
@@ -100,7 +136,8 @@ const userSchema = new mongoose.Schema({
   emergencyContact: {
     name: String,
     phone: String,
-    relationship: String
+    relationship: String,
+    relation: String
   },
   lastLogin: Date,
   joinedDate: Date,

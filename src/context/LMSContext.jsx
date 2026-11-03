@@ -1,24 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import confetti from 'canvas-confetti';
-import {
-  INITIAL_USER,
-  STUDENTS_DATA_SHEET,
-  COURSES as INITIAL_COURSES,
-  ASSIGNMENTS as INITIAL_ASSIGNMENTS,
-  SCHEDULE_EVENTS as INITIAL_EVENTS,
-  STUDY_ANALYTICS,
-  GRADES_DATA,
-  FLASHCARD_DECKS as INITIAL_DECKS,
-  PYTHON_PROBLEMS,
-  DAILY_CODING_CHALLENGES,
-  SCHOOL_SUBJECTS,
-  SCHOOL_HOMEWORK,
-  SCHOOL_UPCOMING_TESTS,
-  SCHOOL_RESULTS,
-  SCHOOL_TODAY_CLASSES,
-  SCHOOL_ANNOUNCEMENTS
-} from '../data/mockData';
-import { apiService, getAuthToken, setAuthToken } from '../services/apiService';
+import { apiService, getAuthToken, setAuthToken, isSessionStale, markSessionStale } from '../services/apiService';
 import { socketService } from '../services/socketService';
 import { getInstitutionConfig } from '../config/institutionConfig';
 import { useFocusTimer } from '../hooks/useFocusTimer';
@@ -26,6 +8,9 @@ import { useFocusTimer } from '../hooks/useFocusTimer';
 const LMSContext = createContext(null);
 
 export const LMSProvider = ({ children }) => {
+  // Cross-tab authentication context isolation
+  const [sessionStaleNotice, setSessionStaleNotice] = useState(null);
+
   // Real-Time Socket States
   const [onlineStats, setOnlineStats] = useState({ total: 1, students: 1, trainers: 0, admins: 0 });
   const [activeAttendancePrompt, setActiveAttendancePrompt] = useState(null);
@@ -112,7 +97,14 @@ export const LMSProvider = ({ children }) => {
     const saved = localStorage.getItem('lumina_portal_config');
     if (saved) {
       try {
-        return JSON.parse(saved);
+        const parsed = JSON.parse(saved);
+        // Purge legacy demo names (e.g. Nexus, Oakridge) if cached in browser
+        if (parsed && typeof parsed.companyName === 'string' &&
+            (parsed.companyName.toLowerCase().includes('nexus') || parsed.companyName.toLowerCase().includes('oakridge'))) {
+          localStorage.removeItem('lumina_portal_config');
+        } else {
+          return parsed;
+        }
       } catch (e) {
         // fallback
       }
@@ -138,9 +130,36 @@ export const LMSProvider = ({ children }) => {
     addToast('Portal Branding Updated', `Company portal set to: ${newConfig.companyName || portalConfig.companyName}`, 'emerald');
   };
 
+  // Selected Institution State for multi-tenant / platform administration workflows
+  const [selectedInstitution, setSelectedInstitutionState] = useState(() => {
+    try {
+      const stored = sessionStorage.getItem('lumina_selected_institution');
+      return stored ? JSON.parse(stored) : null;
+    } catch {
+      return null;
+    }
+  });
+
+  const setSelectedInstitution = (inst) => {
+    setSelectedInstitutionState(inst);
+    try {
+      if (inst) {
+        sessionStorage.setItem('lumina_selected_institution', JSON.stringify(inst));
+      } else {
+        sessionStorage.removeItem('lumina_selected_institution');
+      }
+    } catch (e) {
+      console.warn('Failed to save selectedInstitution in sessionStorage', e);
+    }
+  };
+
+  const selectInstitution = (inst) => setSelectedInstitution(inst);
+
   // Institution Type & Centralized Terminology (Declared after portalConfig to avoid TDZ)
-  const institutionType = user?.institutionType || portalConfig?.institutionType || 'college';
-  const terms = getInstitutionConfig(institutionType);
+  // Priority: selectedInstitution (explicit selection) > user?.institutionType (role-based) > portalConfig?.institutionType
+  const rawType = selectedInstitution?.institutionType || user?.institutionType || portalConfig?.institutionType;
+  const institutionType = (rawType && rawType !== 'unconfigured') ? rawType : null;
+  const terms = getInstitutionConfig(institutionType || 'college');
 
   // Forced password change modal state
   const [mustChangePasswordPromptOpen, setMustChangePasswordPromptOpen] = useState(() => {
@@ -158,7 +177,7 @@ export const LMSProvider = ({ children }) => {
   // Hydrate data from backend server if available
   useEffect(() => {
     const fetchBackendData = async () => {
-      if (!isAuthenticated || user?.mustChangePassword) return;
+      if (!isAuthenticated || user?.mustChangePassword || isSessionStale()) return;
 
       if (['admin', 'superadmin', 'trainer', 'teacher'].includes(user?.role?.toLowerCase())) {
         const res = await apiService.getStudentsDataSheet();
@@ -187,7 +206,14 @@ export const LMSProvider = ({ children }) => {
       try {
         const profileRes = await apiService.getProfile();
         if (profileRes?.success && profileRes.user) {
-          setUser((prev) => ({ ...prev, ...profileRes.user }));
+          setUser((prev) => {
+            // Guard: If active session is SuperAdmin, never let a mismatched student profile downgrade role
+            if (prev?.role === 'superadmin' && String(profileRes.user.role || '').toLowerCase() !== 'superadmin') {
+              console.warn('[LMSContext] Suppressed mismatched profile hydration (current: superadmin, received:', profileRes.user.role, ')');
+              return prev;
+            }
+            return { ...prev, ...profileRes.user };
+          });
         }
       } catch (pErr) {
         console.warn('[LMSContext] Failed to hydrate user profile from backend:', pErr);
@@ -195,6 +221,70 @@ export const LMSProvider = ({ children }) => {
     };
     fetchBackendData();
   }, [isAuthenticated, user?.role, user?.mustChangePassword]);
+
+  // Cross-tab authentication context isolation listener
+  useEffect(() => {
+    const handleStorageChange = (e) => {
+      // Storage event fires across other tabs on the same origin when localStorage is modified
+      if (e.key === 'lumina_auth_token' || e.key === 'lumina_current_user') {
+        const inMemoryToken = tempAuthTokenRef.current || getAuthToken();
+        let identityChanged = false;
+        let newIdentityLabel = 'another session';
+
+        if (e.key === 'lumina_auth_token') {
+          if (e.newValue !== inMemoryToken) {
+            identityChanged = true;
+          }
+        }
+
+        if (e.key === 'lumina_current_user') {
+          try {
+            const parsedNew = e.newValue ? JSON.parse(e.newValue) : null;
+            if (!parsedNew && user) {
+              identityChanged = true;
+              newIdentityLabel = 'logged out';
+            } else if (parsedNew && user) {
+              const newId = parsedNew._id || parsedNew.id || parsedNew.studentId;
+              const currentId = user._id || user.id || user.studentId;
+              const newRole = String(parsedNew.role || '').toLowerCase();
+              const currentRole = String(user.role || '').toLowerCase();
+              if (newId !== currentId || newRole !== currentRole) {
+                identityChanged = true;
+                newIdentityLabel = `${newRole || 'user'} (${parsedNew.name || parsedNew.email || parsedNew.studentId || newId})`;
+              }
+            }
+          } catch {
+            identityChanged = true;
+          }
+        }
+
+        if (identityChanged && isAuthenticated) {
+          console.warn(`[LMSContext] Cross-tab identity change detected (switched to ${newIdentityLabel}). Marking in-memory session context stale.`);
+          markSessionStale(true, `Active session switched to ${newIdentityLabel} in another tab`);
+          socketService.disconnect();
+          setSessionStaleNotice({
+            changedTo: newIdentityLabel,
+            detectedAt: Date.now()
+          });
+        }
+      }
+    };
+
+    window.addEventListener('storage', handleStorageChange);
+    return () => window.removeEventListener('storage', handleStorageChange);
+  }, [user, isAuthenticated]);
+
+  useEffect(() => {
+    const handleSessionStaleEvent = (e) => {
+      socketService.disconnect();
+      setSessionStaleNotice((prev) => prev || {
+        changedTo: e?.detail?.reason || 'another account',
+        detectedAt: Date.now()
+      });
+    };
+    window.addEventListener('lms_session_stale', handleSessionStaleEvent);
+    return () => window.removeEventListener('lms_session_stale', handleSessionStaleEvent);
+  }, []);
 
   // Sync students to localStorage
   useEffect(() => {
@@ -212,7 +302,7 @@ export const LMSProvider = ({ children }) => {
 
   // Connect and sync with Socket.io real-time hub
   useEffect(() => {
-    if (user && !user.mustChangePassword) {
+    if (user && !user.mustChangePassword && !isSessionStale()) {
       socketService.connect(user);
 
       const unsubPresence = socketService.onPresenceUpdate((stats) => {
@@ -297,29 +387,32 @@ export const LMSProvider = ({ children }) => {
   }, [user]);
 
   // Courses & Viewer State
-  const [courses, setCourses] = useState(INITIAL_COURSES);
-  const [activeCourseId, setActiveCourseId] = useState('cs-401');
-  const [activeLessonId, setActiveLessonId] = useState('les-204');
+  const [courses, setCourses] = useState([]);
+  const [activeCourseId, setActiveCourseId] = useState(null);
+  const [activeLessonId, setActiveLessonId] = useState(null);
 
   // Assignments
-  const [assignments, setAssignments] = useState(INITIAL_ASSIGNMENTS);
+  const [assignments, setAssignments] = useState([]);
   const [assignmentFilter, setAssignmentFilter] = useState('all');
 
   // Calendar / Schedule
-  const [events, setEvents] = useState(INITIAL_EVENTS);
+  const [events, setEvents] = useState([]);
   const [eventFilter, setEventFilter] = useState('all');
 
   // Flashcards
-  const [flashcardDecks, setFlashcardDecks] = useState(INITIAL_DECKS);
+  const [flashcardDecks, setFlashcardDecks] = useState([]);
 
   // Coding Challenges
-  const [codingChallenges, setCodingChallenges] = useState(DAILY_CODING_CHALLENGES);
+  const [codingChallenges, setCodingChallenges] = useState([]);
 
   // Global Notes Drawer Open State (Can be opened from any site page)
   const [notesDrawerOpen, setNotesDrawerOpen] = useState(false);
 
   // Grades Data
-  const [gradesData, setGradesData] = useState(GRADES_DATA);
+  const [gradesData, setGradesData] = useState(null);
+
+  // Study Analytics
+  const [studyAnalytics, setStudyAnalytics] = useState({ weeklyHours: [], subjectDistribution: [], totalHours: 0 });
 
   // School Specific Datasets
   const [schoolSubjects, setSchoolSubjects] = useState([]);
@@ -333,7 +426,7 @@ export const LMSProvider = ({ children }) => {
 
   // Real School Academic Data Synchronization
   const fetchSchoolData = async () => {
-    if (!isAuthenticated || user?.mustChangePassword) return;
+    if (!isAuthenticated || user?.mustChangePassword || isSessionStale()) return;
     try {
       const [subsRes, hwRes, resRes, testsRes, attRes, calRes, annRes] = await Promise.all([
         apiService.getSchoolSubjects(),
@@ -372,7 +465,7 @@ export const LMSProvider = ({ children }) => {
 
   // Real Admin & Trainer Data Synchronization (Replaces static mock datasets with real DB entities)
   const fetchAdminAndTrainerData = async () => {
-    if (!isAuthenticated || !user || user?.mustChangePassword) return;
+    if (!isAuthenticated || !user || user?.mustChangePassword || isSessionStale()) return;
     const role = (user.role || '').toLowerCase();
     try {
       if (role === 'admin' || role === 'superadmin') {
@@ -443,83 +536,18 @@ export const LMSProvider = ({ children }) => {
 
   // Universal Study Notes Collection
   const [studyNotes, setStudyNotes] = useState(() => {
-    if (!import.meta.env.DEV) {
-      const saved = localStorage.getItem('lumina_study_notes');
-      if (saved) {
-        try {
-          return JSON.parse(saved);
-        } catch (e) {
-          return [];
-        }
-      }
-      return [];
-    }
     const saved = localStorage.getItem('lumina_study_notes');
     if (saved) {
       try {
-        return JSON.parse(saved);
-      } catch (e) {}
-    }
-    return [
-      {
-        id: 'note-1',
-        title: 'Transformer Scaled Dot-Product Attention',
-        category: 'CS 401 Deep Learning',
-        color: 'emerald',
-        pinned: true,
-        content: `### Scaled Dot-Product Attention
-$$\\text{Attention}(Q, K, V) = \\text{softmax}\\left(\\frac{QK^T}{\\sqrt{d_k}}\\right)V$$
-
-- **Causal Masking**: Set $(i, j) = -\\infty$ for $j > i$ before softmax.
-- **Pre-LN Paradigm**: LayerNorm is applied *before* attention and MLP sub-layers.
-- **GeLU Activation**: Smooth non-linearity for gradient stability.`,
-        createdAt: '2026-08-15T14:30:00Z',
-        sourcePage: 'Course Classroom'
-      },
-      {
-        id: 'note-2',
-        title: "Kadane's Algorithm & Maximum Subarray",
-        category: 'Code Lab & Algorithms',
-        color: 'amber',
-        pinned: true,
-        content: `### Maximum Subarray (Day 15 Challenge)
-- **Time Complexity**: $O(n)$ linear scan.
-- **Space Complexity**: $O(1)$ constant auxiliary space.
-- **Recurrence Relation**:
-  \`current_max = max(nums[i], current_max + nums[i])\`
-  \`max_so_far = max(max_so_far, current_max)\`
-- Reset current running sum if it drops below 0!`,
-        createdAt: '2026-08-15T12:00:00Z',
-        sourcePage: 'Code Lab (Polyglot)'
-      },
-      {
-        id: 'note-3',
-        title: 'Midterm Exam Topics Checklist',
-        category: 'DS 202 Algorithms',
-        color: 'cyan',
-        pinned: false,
-        content: `### DS 202 Exam Preparation
-- [x] Dijkstra's Algorithm with Min-Heap ($O(E \\log V)$)
-- [x] Bellman-Ford Negative Cycle Detection
-- [ ] Tarjan's Strongly Connected Components (SCC)
-- [ ] Dynamic Programming Knapsack 0/1 Memoization`,
-        createdAt: '2026-08-14T09:15:00Z',
-        sourcePage: 'Schedule & Calendar'
-      },
-      {
-        id: 'note-4',
-        title: 'Raft Distributed Consensus Protocol',
-        category: 'CS 330 Systems',
-        color: 'rose',
-        pinned: false,
-        content: `### Raft Key Principles
-1. **Leader Election**: Randomized election timeouts (150ms-300ms) prevent split votes.
-2. **Log Replication**: Leader appends entries to followers; commits when majority match.
-3. **Safety Invariant**: Leader contains all committed entries from past terms.`,
-        createdAt: '2026-08-13T16:45:00Z',
-        sourcePage: 'Dashboard'
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          return parsed.filter(n => n && !String(n.id).startsWith('note-1') && !String(n.id).startsWith('note-2') && !String(n.id).startsWith('note-3') && !String(n.id).startsWith('note-4'));
+        }
+      } catch (e) {
+        return [];
       }
-    ];
+    }
+    return [];
   });
 
   // Save studyNotes to localStorage (still keep it as fallback/cache)
@@ -591,12 +619,7 @@ $$\\text{Attention}(Q, K, V) = \\text{softmax}\\left(\\frac{QK^T}{\\sqrt{d_k}}\\
   };
 
   // Student Notes per lesson (backwards compatibility)
-  const [notes, setNotes] = useState({
-    'les-204': `### GPT-2 Architecture Implementation Notes
-- **Causal Masking**: Must mask out future tokens by setting $(i, j) = -\\infty$ where $j > i$ before softmax.
-- **Layer Normalization**: Applied BEFORE the multi-head attention and MLP sub-layers (Pre-LN paradigm).
-- **Activation Function**: Using standard GeLU (Gaussian Error Linear Unit) rather than standard ReLU for smoother gradient flow.`
-  });
+  const [notes, setNotes] = useState({});
 
   // Toasts
   const [toasts, setToasts] = useState([]);
@@ -672,13 +695,13 @@ $$\\text{Attention}(Q, K, V) = \\text{softmax}\\left(\\frac{QK^T}{\\sqrt{d_k}}\\
         setAuthToken(apiResult.token);
       }
       const matchedClientStudent = students.find(
-        (s) => (s.email.toLowerCase() === cleanId || s.studentId.toLowerCase() === cleanId)
-      ) || INITIAL_USER;
+        (s) => (s.email?.toLowerCase() === cleanId || s.studentId?.toLowerCase() === cleanId)
+      );
       const mustChange = apiResult.mustChangePassword ?? apiResult.user.mustChangePassword ?? false;
       const fullUser = { 
-        ...matchedClientStudent, 
+        ...(matchedClientStudent || {}), 
         ...apiResult.user, 
-        role: (apiResult.user.role || matchedClientStudent.role || 'student').toLowerCase(),
+        role: (apiResult.user.role || matchedClientStudent?.role || 'student').toLowerCase(),
         mustChangePassword: mustChange 
       };
       
@@ -686,6 +709,8 @@ $$\\text{Attention}(Q, K, V) = \\text{softmax}\\left(\\frac{QK^T}{\\sqrt{d_k}}\\
         localStorage.setItem('lumina_current_user', JSON.stringify(fullUser));
       } catch (e) {}
 
+      markSessionStale(false);
+      setSessionStaleNotice(null);
       setUser(fullUser);
       setIsAuthenticated(true);
       setLoginModalOpen(false);
@@ -693,28 +718,9 @@ $$\\text{Attention}(Q, K, V) = \\text{softmax}\\left(\\frac{QK^T}{\\sqrt{d_k}}\\
         setMustChangePasswordPromptOpen(true);
       } else {
         triggerConfetti();
-        addToast(`Welcome back, ${fullUser.name}!`, `Authenticated as ${fullUser.role} (${fullUser.studentId})`, 'emerald');
+        addToast(`Welcome back, ${fullUser.name || 'User'}!`, `Authenticated as ${fullUser.role} (${fullUser.studentId || fullUser.email || 'Session Active'})`, 'emerald');
       }
       return { success: true, user: fullUser, mustChangePassword: mustChange };
-    }
-
-    // 2. Client-side fallback check (STRICTLY DEVELOPMENT ONLY — NEVER in production)
-    if (import.meta.env.DEV) {
-      const matched = students.find(
-        (s) =>
-          (s.email.toLowerCase() === cleanId || s.studentId.toLowerCase() === cleanId) &&
-          s.password === cleanPass
-      );
-
-      if (matched) {
-        const normalizedUser = { ...matched, role: (matched.role || 'student').toLowerCase() };
-        setUser(normalizedUser);
-        setIsAuthenticated(true);
-        setLoginModalOpen(false);
-        triggerConfetti();
-        addToast(`Welcome back, ${matched.name}!`, `Authenticated as ${matched.role} (${matched.studentId}) [DEV FALLBACK]`, 'emerald');
-        return { success: true, user: matched };
-      }
     }
 
     return {
@@ -731,10 +737,17 @@ $$\\text{Attention}(Q, K, V) = \\text{softmax}\\left(\\frac{QK^T}{\\sqrt{d_k}}\\
         setAuthToken(apiResult.token);
       }
       const mustChange = apiResult.mustChangePassword ?? apiResult.user.mustChangePassword ?? false;
-      const fullUser = { ...INITIAL_USER, ...apiResult.user, mustChangePassword: mustChange };
+      const fullUser = {
+        ...apiResult.user,
+        isTwoFactorEnabled: apiResult.isTwoFactorEnabled ?? apiResult.user?.isTwoFactorEnabled ?? true,
+        mfaSetupRequired: false,
+        mustChangePassword: mustChange
+      };
       try {
         localStorage.setItem('lumina_current_user', JSON.stringify(fullUser));
       } catch (e) {}
+      markSessionStale(false);
+      setSessionStaleNotice(null);
       setUser(fullUser);
       setIsAuthenticated(true);
       setLoginModalOpen(false);
@@ -742,7 +755,7 @@ $$\\text{Attention}(Q, K, V) = \\text{softmax}\\left(\\frac{QK^T}{\\sqrt{d_k}}\\
         setMustChangePasswordPromptOpen(true);
       } else {
         triggerConfetti();
-        addToast(`Welcome back, ${fullUser.name}!`, `2FA Verified`, 'emerald');
+        addToast(`Welcome back, ${fullUser.name || 'User'}!`, `2FA Verified`, 'emerald');
       }
       return { success: true, user: fullUser, mustChangePassword: mustChange };
     }
@@ -804,6 +817,8 @@ $$\\text{Attention}(Q, K, V) = \\text{softmax}\\left(\\frac{QK^T}{\\sqrt{d_k}}\\
     setToasts([]);
     localStorage.removeItem('lumina_current_user');
     setAuthToken(null);
+    markSessionStale(false);
+    setSessionStaleNotice(null);
   };
 
   useEffect(() => {
@@ -820,7 +835,7 @@ $$\\text{Attention}(Q, K, V) = \\text{softmax}\\left(\\frac{QK^T}{\\sqrt{d_k}}\\
         // Authoritative session verification: probe /auth/profile to confirm token validity
         // This protects valid tokens from being wiped by isolated 401 errors on secondary calls
         const profileRes = await apiService.getProfile();
-        if (profileRes && (profileRes.success || profileRes.user)) {
+        if (profileRes && (profileRes.success || profileRes.user || profileRes.status === 304 || profileRes.cached)) {
           // Token is still valid on the server! Do not wipe state.
           return;
         }
@@ -859,69 +874,49 @@ $$\\text{Attention}(Q, K, V) = \\text{softmax}\\left(\\frac{QK^T}{\\sqrt{d_k}}\\
     return () => window.removeEventListener('lms_session_expired', handleSessionExpired);
   }, [isAuthenticated]);
 
-  const switchUser = (studentId) => {
-    const target = students.find((s) => s.id === studentId || s.studentId === studentId);
-    if (target) {
-      setUser(target);
-      setIsAuthenticated(true);
-      triggerConfetti();
-      addToast('Profile Switched', `Now logged in as ${target.name} (${target.major})`, 'emerald');
-    }
+  const switchUser = () => {
+    console.warn('[LMSContext] Client-only switchUser is permanently disabled for authentication integrity. Real credentials must be authenticated via backend.');
   };
 
   // --- DATA SHEET CRUD OPERATIONS ---
   const addStudent = async (studentData) => {
-    const randomId = Math.floor(1000 + Math.random() * 9000);
-    const firstName = studentData.name.split(' ')[0] || 'Student';
-    const lastName = studentData.name.split(' ')[1] || 'Nexus';
+    try {
+      const res = await apiService.createStudent(studentData);
+      if (res && (res.success || res.student)) {
+        const createdStudent = res.student || res.data || studentData;
+        const normalizedStudent = {
+          ...createdStudent,
+          id: createdStudent.studentId || createdStudent._id || createdStudent.id
+        };
 
-    const generatedStudentId = studentData.studentId || `NX-${new Date().getFullYear()}-${randomId}`;
-    const generatedEmail =
-      studentData.email ||
-      `${firstName.toLowerCase()}.${lastName.toLowerCase()}@nexus.edu`;
-    const generatedPassword =
-      studentData.password || `${firstName}#Nexus${Math.floor(10 + Math.random() * 89)}!`;
+        // SECURITY: Strip plaintext temporaryPassword before persisting in long-lived state
+        const safeStudentForState = { ...normalizedStudent };
+        delete safeStudentForState.temporaryPassword;
 
-    const newStudent = {
-      id: `usr_${Math.random().toString(36).substr(2, 7)}`,
-      studentId: generatedStudentId,
-      name: studentData.name,
-      email: generatedEmail,
-      password: generatedPassword,
-      role: studentData.role || 'Student',
-      avatar:
-        studentData.avatar ||
-        `https://images.unsplash.com/photo-${1500000000000 + Math.floor(Math.random() * 50000000)}?w=150&auto=format&fit=crop&q=80`,
-      major: studentData.major || 'Computer Science & AI',
-      department: studentData.department || 'School of Computing',
-      university: 'Nexus Institute of Technology',
-      year: studentData.year || 'Junior (Year 3)',
-      streakDays: 1,
-      xp: 100,
-      level: 'Novice Scholar',
-      status: 'Online',
-      accountStatus: 'Active',
-      phone: studentData.phone || '+1 (617) 555-' + Math.floor(1000 + Math.random() * 9000),
-      lastLogin: 'Never (Just Created)',
-      joinedDate: new Date().toISOString().split('T')[0],
-      enrolledCourses: studentData.enrolledCourses || ['CS 401', 'CS 330'],
-      stats: {
-        gpa: studentData.gpa || '3.80',
-        termGpa: studentData.termGpa || '3.85',
-        completedCredits: parseInt(studentData.completedCredits) || 30,
-        totalCredits: 120,
-        totalStudyHours: 20.0,
-        assignmentCompletionRate: 90
+        setStudents((prev) => [safeStudentForState, ...prev]);
+        triggerConfetti();
+        addToast('Student Added', `Student ${createdStudent.name} registered successfully.`, 'emerald');
+
+        const temporaryPassword = res.temporaryPassword || res.student?.temporaryPassword || null;
+        const isTemporaryPassword = res.isTemporaryPassword !== false && Boolean(temporaryPassword);
+
+        return {
+          success: true,
+          student: safeStudentForState,
+          temporaryPassword,
+          isTemporaryPassword,
+          loginIdentifier: createdStudent.studentId || createdStudent.email
+        };
+      } else {
+        const errMsg = res?.message || 'Failed to create student account.';
+        addToast('Creation Failed', errMsg, 'rose');
+        return null;
       }
-    };
-
-    // Save to Backend server
-    await apiService.createStudent(newStudent);
-
-    setStudents((prev) => [newStudent, ...prev]);
-    triggerConfetti();
-    addToast('Student Added to Data Sheet', `Generated ID: ${generatedStudentId} & Secure Password`, 'emerald');
-    return newStudent;
+    } catch (err) {
+      console.error('addStudent error:', err);
+      addToast('Creation Error', err.message || 'Failed to provision student.', 'rose');
+      return null;
+    }
   };
 
   const updateStudent = async (studentId, updatedFields) => {
@@ -929,9 +924,9 @@ $$\\text{Attention}(Q, K, V) = \\text{softmax}\\left(\\frac{QK^T}{\\sqrt{d_k}}\\
       const res = await apiService.updateStudent(studentId, updatedFields);
       if (res && res.success) {
         setStudents((prev) =>
-          prev.map((s) => (s.id === studentId ? { ...s, ...updatedFields } : s))
+          prev.map((s) => (s.id === studentId || s._id === studentId || s.studentId === studentId ? { ...s, ...updatedFields } : s))
         );
-        if (user.id === studentId) {
+        if (user.id === studentId || user.studentId === studentId) {
           setUser((prev) => ({ ...prev, ...updatedFields }));
         }
         addToast('Data Sheet Updated', 'Student profile details synced.', 'emerald');
@@ -948,11 +943,46 @@ $$\\text{Attention}(Q, K, V) = \\text{softmax}\\left(\\frac{QK^T}{\\sqrt{d_k}}\\
     }
   };
 
-  const deleteStudent = async (studentId) => {
-    await apiService.deleteStudent(studentId);
+  const deleteStudent = async (studentId, permanent = false) => {
+    try {
+      const res = await apiService.deleteStudent(studentId, permanent);
+      if (res && res.success) {
+        setStudents((prev) => prev.filter((s) => (s.id !== studentId && s._id !== studentId && s.studentId !== studentId)));
+        addToast(
+          permanent ? 'Record Permanently Deleted' : 'Student Deactivated',
+          permanent ? 'Student and all academic records purged.' : 'Student account deactivated.',
+          'subtle'
+        );
+        return { success: true };
+      } else {
+        addToast('Deletion Failed', res?.message || 'Could not delete student.', 'rose');
+        return { success: false, message: res?.message };
+      }
+    } catch (err) {
+      console.error('deleteStudent error:', err);
+      addToast('Error', err.message || 'Network error deleting student.', 'rose');
+      return { success: false, message: err.message };
+    }
+  };
 
-    setStudents((prev) => prev.filter((s) => s.id !== studentId));
-    addToast('Record Removed', 'Student removed from data sheet.', 'subtle');
+  const restoreStudent = async (studentId) => {
+    try {
+      const res = await apiService.restoreStudent(studentId);
+      if (res && res.success) {
+        if (res.student) {
+          setStudents((prev) => [res.student, ...prev.filter(s => s._id !== res.student._id && s.studentId !== res.student.studentId)]);
+        }
+        addToast('Student Restored', 'Student account has been restored to active status.', 'emerald');
+        return { success: true, student: res.student };
+      } else {
+        addToast('Restoration Failed', res?.message || 'Could not restore student.', 'rose');
+        return { success: false, message: res?.message };
+      }
+    } catch (err) {
+      console.error('restoreStudent error:', err);
+      addToast('Error', err.message || 'Network error restoring student.', 'rose');
+      return { success: false, message: err.message };
+    }
   };
 
   const resetStudentPassword = async (studentId) => {
@@ -1210,6 +1240,7 @@ $$\\text{Attention}(Q, K, V) = \\text{softmax}\\left(\\frac{QK^T}{\\sqrt{d_k}}\\
         addStudent,
         updateStudent,
         deleteStudent,
+        restoreStudent,
         resetStudentPassword,
         exportStudentsData,
         updateUserStatus,
@@ -1243,9 +1274,11 @@ $$\\text{Attention}(Q, K, V) = \\text{softmax}\\left(\\frac{QK^T}{\\sqrt{d_k}}\\
         setFlashcardDecks,
         codingChallenges,
         setCodingChallenges,
-        studyAnalytics: STUDY_ANALYTICS,
-        gradesData: GRADES_DATA,
-        pythonProblems: PYTHON_PROBLEMS,
+        studyAnalytics,
+        setStudyAnalytics,
+        gradesData,
+        setGradesData,
+        pythonProblems: [],
         toasts,
         addToast,
         removeToast,
@@ -1254,6 +1287,9 @@ $$\\text{Attention}(Q, K, V) = \\text{softmax}\\left(\\frac{QK^T}{\\sqrt{d_k}}\\
         activeAttendancePrompt,
         setActiveAttendancePrompt,
         socketService,
+        selectedInstitution,
+        setSelectedInstitution,
+        selectInstitution,
         institutionType,
         setInstitutionType,
         terms,
@@ -1283,9 +1319,99 @@ $$\\text{Attention}(Q, K, V) = \\text{softmax}\\left(\\frac{QK^T}{\\sqrt{d_k}}\\
         fetchAdminAndTrainerData,
         refreshAdminData: fetchAdminAndTrainerData,
         submitSchoolHomework,
-        markSchoolAttendance
+        markSchoolAttendance,
+        sessionStaleNotice,
+        setSessionStaleNotice,
+        isSessionStale,
+        markSessionStale
       }}
     >
+      {sessionStaleNotice && (
+        <div
+          role="alert"
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            zIndex: 99999,
+            backgroundColor: '#991B1B',
+            color: '#ffffff',
+            padding: '0.85rem 1.5rem',
+            boxShadow: '0 4px 14px rgba(0, 0, 0, 0.35)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: '1rem'
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            <span style={{ fontSize: '1.25rem' }}>⚠️</span>
+            <div>
+              <div style={{ fontWeight: 800, fontSize: '0.92rem', letterSpacing: '0.01em' }}>
+                Authentication Context Changed in Another Tab
+              </div>
+              <div style={{ fontSize: '0.8rem', opacity: 0.95 }}>
+                Another browser tab signed into {sessionStaleNotice.changedTo}. Protected API requests in this tab are paused to protect account boundaries.
+              </div>
+            </div>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <button
+              type="button"
+              onClick={() => {
+                setLoginModalOpen(true);
+              }}
+              style={{
+                backgroundColor: '#ffffff',
+                color: '#991B1B',
+                border: 'none',
+                padding: '0.45rem 0.9rem',
+                borderRadius: '6px',
+                fontWeight: 700,
+                fontSize: '0.82rem',
+                cursor: 'pointer'
+              }}
+            >
+              Log In as Super Admin
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                window.location.reload();
+              }}
+              style={{
+                backgroundColor: 'rgba(255, 255, 255, 0.2)',
+                color: '#ffffff',
+                border: '1px solid rgba(255, 255, 255, 0.4)',
+                padding: '0.45rem 0.85rem',
+                borderRadius: '6px',
+                fontWeight: 600,
+                fontSize: '0.82rem',
+                cursor: 'pointer'
+              }}
+            >
+              Sync Tab to New Account (Reload)
+            </button>
+            <button
+              type="button"
+              onClick={() => setSessionStaleNotice(null)}
+              style={{
+                backgroundColor: 'transparent',
+                color: '#ffffff',
+                border: 'none',
+                padding: '0.45rem',
+                cursor: 'pointer',
+                opacity: 0.8
+              }}
+              title="Dismiss Notice"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
       {children}
     </LMSContext.Provider>
   );

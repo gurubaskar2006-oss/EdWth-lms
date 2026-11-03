@@ -160,12 +160,14 @@ export const getEffectiveClient = () => {
     return redisClient;
   }
 
-  if (process.env.NODE_ENV === 'production') {
-    // In production, NEVER silently revert to in-memory store
+  // Multi-node clustered deployment enforcement:
+  // If Redis is explicitly required (REQUIRE_REDIS === 'true') and unavailable, fail closed
+  if (process.env.REQUIRE_REDIS === 'true') {
     return null;
   }
 
-  // Development and test fallback only
+  // In single-server mode (development, test, or single-instance production where REQUIRE_REDIS !== 'true'),
+  // safely utilize the high-fidelity in-memory attendance store
   return globalDevMemoryStore;
 };
 
