@@ -292,6 +292,56 @@ export const executeInBrowserSandbox = async (language, code, stdin = '') => {
     }
   }
 
+  // 4. C / C++ / Java Execution via Isolated Container Sandbox
+  if (lang === 'c++' || lang === 'cpp' || lang === 'c' || lang === 'java') {
+    try {
+      let langId = 54; // C++ (GCC 9.2.0)
+      if (lang === 'c') langId = 50;
+      if (lang === 'java') langId = 62;
+
+      const controller = new AbortController();
+      const timeoutHandle = setTimeout(() => controller.abort(), 12000);
+
+      const res = await fetch('https://ce.judge0.com/submissions?base64_encoded=false&wait=true', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          source_code: code,
+          language_id: langId,
+          stdin: stdin || ''
+        }),
+        signal: controller.signal
+      });
+
+      clearTimeout(timeoutHandle);
+
+      if (res.ok) {
+        const data = await res.json();
+        const stdout = data.stdout || '';
+        const stderr = data.stderr || data.compile_output || data.message || '';
+        const output = stdout || stderr || (data.status?.description || 'Executed');
+        const codeNum = data.status?.id === 3 ? 0 : (data.exit_code ?? 1);
+
+        return {
+          success: true,
+          data: {
+            language: lang === 'c' ? 'c' : (lang === 'java' ? 'java' : 'c++'),
+            version: `${lang === 'java' ? 'OpenJDK 13' : 'GCC 9.2.0'} (Isolated Sandbox)`,
+            run: {
+              stdout,
+              stderr,
+              output,
+              code: codeNum,
+              signal: null
+            }
+          }
+        };
+      }
+    } catch (e) {
+      console.warn('Judge0 client runner failed:', e.message);
+    }
+  }
+
   return {
     success: false,
     message: `Language '${language}' requires an active backend compiler or container sandbox.`

@@ -50,14 +50,6 @@ export const getAuthToken = () => {
   try {
     if (typeof window === 'undefined') return activeSessionToken || null;
 
-    // Purge legacy non-canonical keys if encountered
-    try {
-      if (localStorage.getItem('token')) localStorage.removeItem('token');
-      if (localStorage.getItem('jwt')) localStorage.removeItem('jwt');
-      if (sessionStorage.getItem('token')) sessionStorage.removeItem('token');
-      if (sessionStorage.getItem('jwt')) sessionStorage.removeItem('jwt');
-    } catch {}
-
     if (activeSessionToken && typeof activeSessionToken === 'string' && activeSessionToken !== 'null' && activeSessionToken !== 'undefined') {
       return activeSessionToken;
     }
@@ -66,6 +58,18 @@ export const getAuthToken = () => {
     if (canonicalToken && typeof canonicalToken === 'string' && canonicalToken !== 'null' && canonicalToken !== 'undefined') {
       return canonicalToken;
     }
+
+    const sessionToken = sessionStorage.getItem('lumina_auth_token');
+    if (sessionToken && typeof sessionToken === 'string' && sessionToken !== 'null' && sessionToken !== 'undefined') {
+      return sessionToken;
+    }
+
+    try {
+      const storedUser = JSON.parse(localStorage.getItem('lumina_current_user') || '{}');
+      if (storedUser?.token && typeof storedUser.token === 'string' && storedUser.token !== 'null' && storedUser.token !== 'undefined') {
+        return storedUser.token;
+      }
+    } catch {}
 
     return null;
   } catch {
@@ -86,18 +90,40 @@ export const setAuthToken = (token) => {
     if (typeof window === 'undefined') return;
     if (token && typeof token === 'string' && token !== 'null' && token !== 'undefined') {
       localStorage.setItem('lumina_auth_token', token);
+      sessionStorage.setItem('lumina_auth_token', token);
     } else {
       localStorage.removeItem('lumina_auth_token');
-    }
-    // Clean up any legacy or ambient session keys
-    try {
-      localStorage.removeItem('token');
-      localStorage.removeItem('jwt');
-      sessionStorage.removeItem('token');
-      sessionStorage.removeItem('jwt');
       sessionStorage.removeItem('lumina_auth_token');
-    } catch {}
+    }
   } catch {}
+};
+
+/**
+ * Authoritatively resolves the active tenant ID from session storage or authenticated user.
+ */
+export const getActiveTenantId = () => {
+  try {
+    if (typeof window === 'undefined') return null;
+    const storedInst = sessionStorage.getItem('lumina_selected_institution');
+    if (storedInst) {
+      const parsed = JSON.parse(storedInst);
+      const instId = parsed?._id || parsed?.id;
+      if (instId && typeof instId === 'string' && instId !== 'null' && instId !== 'undefined') {
+        return instId;
+      }
+    }
+    const storedUser = localStorage.getItem('lumina_current_user');
+    if (storedUser) {
+      const parsedUser = JSON.parse(storedUser);
+      const userTenant = parsedUser?.tenantId?._id || parsedUser?.tenantId;
+      if (userTenant && typeof userTenant === 'string' && userTenant !== 'null' && userTenant !== 'undefined') {
+        return userTenant;
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
 };
 
 /**
@@ -126,7 +152,8 @@ export const apiService = {
       targetUrl.includes('/auth/passkeys/login') ||
       targetUrl.includes('/auth/2fa/verify') ||
       targetUrl.includes('/auth/recovery') ||
-      targetUrl.includes('/auth/logout');
+      targetUrl.includes('/auth/logout') ||
+      targetUrl.includes('/auth/change-password');
 
     // DISPATCH PROTECTION: Prevent stale context from dispatching protected API requests
     if (isSessionStaleFlag && !isAuthRevalidationUrl) {
@@ -156,6 +183,9 @@ export const apiService = {
     const token = getAuthToken();
     const authHeader = token ? { 'Authorization': `Bearer ${token}` } : {};
 
+    const activeTenantId = getActiveTenantId();
+    const tenantHeader = activeTenantId ? { 'x-tenant-id': activeTenantId } : {};
+
     const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData;
     const defaultHeaders = isFormData ? {} : { 'Content-Type': 'application/json' };
 
@@ -180,6 +210,7 @@ export const apiService = {
         headers: {
           ...defaultHeaders,
           ...authHeader,
+          ...tenantHeader,
           ...options.headers,
         }
       });
@@ -703,15 +734,24 @@ export const apiService = {
 
   async changePassword(newPassword, confirmPassword, currentPassword = '', tokenOverride = null) {
     try {
-      const token = tokenOverride || getAuthToken();
-      if (tokenOverride) {
-        setAuthToken(tokenOverride);
+      let token = tokenOverride || getAuthToken();
+      if (!token) {
+        try {
+          const storedUser = JSON.parse(localStorage.getItem('lumina_current_user') || '{}');
+          if (storedUser?.token) token = storedUser.token;
+        } catch {}
       }
-      const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
+      if (token) {
+        setAuthToken(token);
+      }
+      const headers = token ? {
+        'Authorization': `Bearer ${token}`,
+        'x-auth-token': token
+      } : {};
       const res = await this._fetch(`${API_BASE_URL}/auth/change-password`, {
         method: 'POST',
         headers,
-        body: JSON.stringify({ newPassword, confirmPassword, currentPassword }),
+        body: JSON.stringify({ newPassword, confirmPassword, currentPassword, token: token || undefined }),
       });
       const data = await res.json();
       if (data && data.success && data.token) {

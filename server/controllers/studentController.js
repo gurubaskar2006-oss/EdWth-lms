@@ -286,7 +286,9 @@ export const createStudent = async (req, res) => {
   }
 
   const isSuperAdmin = req.user?.role === 'superadmin';
-  const targetTenantId = (isSuperAdmin && req.body.tenantId) ? req.body.tenantId : req.tenantId;
+  const targetTenantId = isSuperAdmin
+    ? (req.body.tenantId || req.body.targetTenantId || req.body.collegeId || req.headers['x-tenant-id'] || req.query.tenantId)
+    : req.tenantId;
 
   if (!targetTenantId) {
     return res.status(400).json({ success: false, message: 'Target institution (tenantId) is required to provision student.' });

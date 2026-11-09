@@ -68,14 +68,38 @@ import {
 } from 'lucide-react';
 
 // ─── Create Batch Modal ───────────────────────────────────────────────────────
-const CreateBatchModal = ({ isOpen, onClose, onCreated, terms }) => {
+const CreateBatchModal = ({ isOpen, onClose, onCreated, terms: propTerms, user: propUser, selectedInstitution: propSelectedInstitution }) => {
+  const lms = useLMS?.() || {};
+  const terms = propTerms || lms?.terms;
+  const user = propUser || lms?.user;
+  const selectedInstitution = propSelectedInstitution || lms?.selectedInstitution;
+
   const [name, setName] = useState('');
   const [code, setCode] = useState('');
   const [department, setDepartment] = useState('School of Computing');
   const [semester, setSemester] = useState('Fall 2026');
   const [maxCapacity, setMaxCapacity] = useState('35');
+  const [institutions, setInstitutions] = useState([]);
+  const [selectedTenantId, setSelectedTenantId] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
+
+  const isSuperAdmin = (user?.role || '').toLowerCase() === 'superadmin';
+
+  useEffect(() => {
+    if (isOpen && isSuperAdmin) {
+      apiService.getAdminInstitutions()
+        .then(res => {
+          if (res?.institutions) {
+            setInstitutions(res.institutions.filter(i => i.status === 'active' || !i.status));
+          }
+        })
+        .catch(() => {});
+      if (!selectedTenantId) {
+        setSelectedTenantId(selectedInstitution?._id || selectedInstitution?.id || '');
+      }
+    }
+  }, [isOpen, isSuperAdmin, selectedInstitution]);
 
   if (!isOpen) return null;
 
@@ -85,6 +109,16 @@ const CreateBatchModal = ({ isOpen, onClose, onCreated, terms }) => {
       setError('Name and Code are required.');
       return;
     }
+
+    const effectiveTenantId = isSuperAdmin
+      ? (selectedTenantId || selectedInstitution?._id || selectedInstitution?.id)
+      : (user?.tenantId?._id || user?.tenantId);
+
+    if (!effectiveTenantId) {
+      setError('Target institution is required to create a cohort.');
+      return;
+    }
+
     setIsSubmitting(true);
     setError('');
 
@@ -94,7 +128,9 @@ const CreateBatchModal = ({ isOpen, onClose, onCreated, terms }) => {
         code: code.trim().toUpperCase(),
         department,
         semester,
-        maxCapacity: parseInt(maxCapacity) || 35
+        maxCapacity: parseInt(maxCapacity) || 35,
+        tenantId: effectiveTenantId,
+        targetTenantId: effectiveTenantId
       });
       if (data && data.success) {
         onCreated(data.batch);
@@ -136,6 +172,26 @@ const CreateBatchModal = ({ isOpen, onClose, onCreated, terms }) => {
         )}
 
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          {isSuperAdmin && (
+            <div>
+              <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.35rem' }}>
+                Target Institution / School *
+              </label>
+              <select
+                value={selectedTenantId}
+                onChange={(e) => setSelectedTenantId(e.target.value)}
+                required
+                style={{ width: '100%', fontSize: '0.86rem' }}
+              >
+                <option value="">-- Select Target Institution --</option>
+                {institutions.map((inst) => (
+                  <option key={inst._id || inst.id} value={inst._id || inst.id}>
+                    {inst.name} ({inst.institutionType === 'school' ? 'School' : 'College'})
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
           <div>
             <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.35rem' }}>
               {terms?.groupLabel || 'Batch'} Name
@@ -1718,6 +1774,8 @@ export const AdminApp = () => {
           addToast('Batch Created', 'New academic cohort provisioned successfully.', 'emerald');
         }}
         terms={terms}
+        user={user}
+        selectedInstitution={selectedInstitution}
       />
 
       <ProvisionTrainerModal

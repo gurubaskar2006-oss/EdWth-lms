@@ -259,11 +259,13 @@ export const AdministratorsView = () => {
 
 // ─── 3. Subjects / Courses Catalog Management View ────────────────────────────
 export const SubjectsCatalogView = () => {
-  const { terms, institutionType, addToast } = useLMS();
+  const { terms, institutionType, addToast, selectedInstitution, user } = useLMS();
   const [courses, setCourses] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [modalOpen, setModalOpen] = useState(false);
+  const [institutions, setInstitutions] = useState([]);
+  const [selectedTenantId, setSelectedTenantId] = useState('');
   const [newCourse, setNewCourse] = useState({ title: '', code: '', department: 'School of Computing', credits: '3' });
   const [submitting, setSubmitting] = useState(false);
   const [deletingCourseId, setDeletingCourseId] = useState(null);
@@ -280,6 +282,21 @@ export const SubjectsCatalogView = () => {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (modalOpen && user?.role === 'superadmin') {
+      apiService.getAdminInstitutions()
+        .then(res => {
+          if (res?.institutions) {
+            setInstitutions(res.institutions.filter(i => i.status === 'active' || !i.status));
+          }
+        })
+        .catch(() => {});
+      if (!selectedTenantId) {
+        setSelectedTenantId(selectedInstitution?._id || selectedInstitution?.id || '');
+      }
+    }
+  }, [modalOpen, user?.role, selectedInstitution]);
 
   const handleDeleteCourse = async (course) => {
     if (!window.confirm(`Are you sure you want to delete course "${course.title}" (${course.code})?`)) {
@@ -313,18 +330,30 @@ export const SubjectsCatalogView = () => {
 
   useEffect(() => {
     fetchCourses();
-  }, []);
+  }, [selectedInstitution]);
 
   const handleCreateCourse = async (e) => {
     e.preventDefault();
     if (!newCourse.title.trim() || !newCourse.code.trim()) return;
+
+    const effectiveTenantId = (user?.role === 'superadmin')
+      ? (selectedTenantId || selectedInstitution?._id || selectedInstitution?.id)
+      : (user?.tenantId?._id || user?.tenantId);
+
+    if (!effectiveTenantId) {
+      addToast('Institution Required', 'Please select a target institution before registering a course.', 'amber');
+      return;
+    }
+
     try {
       setSubmitting(true);
       const res = await apiService.createAdminCourse({
         title: newCourse.title.trim(),
         code: newCourse.code.trim().toUpperCase(),
         department: newCourse.department,
-        credits: parseInt(newCourse.credits) || 3
+        credits: parseInt(newCourse.credits) || 3,
+        tenantId: effectiveTenantId,
+        targetTenantId: effectiveTenantId
       });
       if (res?.success) {
         addToast('Course Created', `${newCourse.title} registered in curriculum catalog.`, 'emerald');
@@ -424,6 +453,26 @@ export const SubjectsCatalogView = () => {
               <button onClick={() => setModalOpen(false)} className="btn-icon" style={{ width: '32px', height: '32px' }}><X size={18} /></button>
             </div>
             <form onSubmit={handleCreateCourse} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              {user?.role === 'superadmin' && (
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.35rem' }}>
+                    Target Institution / School *
+                  </label>
+                  <select
+                    value={selectedTenantId}
+                    onChange={(e) => setSelectedTenantId(e.target.value)}
+                    required
+                    style={{ width: '100%', fontSize: '0.86rem' }}
+                  >
+                    <option value="">-- Select Target Institution --</option>
+                    {institutions.map((inst) => (
+                      <option key={inst._id || inst.id} value={inst._id || inst.id}>
+                        {inst.name} ({inst.institutionType === 'school' ? 'School' : 'College'})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
               <div>
                 <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.35rem' }}>Subject Name</label>
                 <input
@@ -824,7 +873,7 @@ export const AcademicOpsView = () => {
 
 // ─── 7. Announcements Operations View ─────────────────────────────────────────
 export const AnnouncementsOpsView = () => {
-  const { addToast } = useLMS();
+  const { addToast, user, selectedInstitution } = useLMS();
   const [headline, setHeadline] = useState('');
   const [body, setBody] = useState('');
   const [priority, setPriority] = useState('normal');
@@ -872,6 +921,10 @@ export const AnnouncementsOpsView = () => {
     setSubmitting(true);
     try {
       const targetBatch = batches.find(b => String(b._id || b.id) === String(targetBatchId));
+      const effectiveTenantId = (user?.role === 'superadmin')
+        ? (selectedInstitution?._id || selectedInstitution?.id || undefined)
+        : (user?.tenantId?._id || user?.tenantId);
+
       const payload = {
         title: headline.trim(),
         content: body.trim(),
@@ -879,7 +932,9 @@ export const AnnouncementsOpsView = () => {
         priority,
         batchId: targetBatchId !== 'all' ? targetBatchId : undefined,
         batchName: targetBatch ? targetBatch.name : undefined,
-        status: 'published'
+        status: 'published',
+        tenantId: effectiveTenantId,
+        targetTenantId: effectiveTenantId
       };
 
       const res = await apiService.createAdminAnnouncement(payload);

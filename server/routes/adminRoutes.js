@@ -55,7 +55,7 @@ router.use(requireIdempotency());
  */
 const getAdminTenantFilter = (req) => {
   if (req.user.role === 'superadmin') {
-    const filterId = req.query.tenantId || req.query.collegeId;
+    const filterId = req.query.tenantId || req.query.collegeId || req.headers['x-tenant-id'];
     if (filterId && mongoose.Types.ObjectId.isValid(filterId)) {
       return { tenantId: filterId };
     }
@@ -188,11 +188,16 @@ router.post('/batches', async (req, res) => {
   try {
     const isSuperAdmin = req.user.role === 'superadmin';
     const targetTenantId = isSuperAdmin
-      ? (req.body.tenantId || req.body.collegeId || req.query.tenantId)
+      ? (req.body.targetTenantId || req.body.tenantId || req.body.collegeId || req.headers['x-tenant-id'] || req.query.tenantId)
       : req.tenantId;
 
     if (!targetTenantId || !mongoose.Types.ObjectId.isValid(targetTenantId)) {
       return res.status(400).json({ success: false, message: 'Valid target institution (tenantId) is required to create a batch.' });
+    }
+
+    const targetCollege = await College.findOne({ _id: targetTenantId, status: 'active' });
+    if (!targetCollege) {
+      return res.status(400).json({ success: false, message: 'Specified target institution does not exist or is inactive.' });
     }
 
     const { name, ...rest } = req.body;
@@ -3422,9 +3427,18 @@ router.post('/courses', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Course/Subject title is required.' });
     }
 
-    const targetTenant = (req.user.role === 'superadmin' && targetTenantId) ? targetTenantId : req.tenantId;
-    if (!targetTenant) {
+    const isSuperAdmin = req.user.role === 'superadmin';
+    const targetTenant = isSuperAdmin
+      ? (targetTenantId || req.body.tenantId || req.body.collegeId || req.headers['x-tenant-id'] || req.query.tenantId)
+      : req.tenantId;
+
+    if (!targetTenant || !mongoose.Types.ObjectId.isValid(targetTenant)) {
       return res.status(400).json({ success: false, message: 'Target tenant ID is required.' });
+    }
+
+    const targetCollege = await College.findOne({ _id: targetTenant, status: 'active' });
+    if (!targetCollege) {
+      return res.status(400).json({ success: false, message: 'Specified target institution does not exist or is inactive.' });
     }
 
     let assignedTrainer = null;
@@ -3734,12 +3748,13 @@ router.post('/announcements', async (req, res) => {
     let isPlatformWide = false;
 
     if (isSuperAdmin) {
-      if (targetTenantId && mongoose.Types.ObjectId.isValid(targetTenantId)) {
-        const col = await College.findById(targetTenantId).lean();
+      const explicitTarget = targetTenantId || req.body.tenantId || req.body.collegeId || req.headers['x-tenant-id'] || req.query.tenantId;
+      if (explicitTarget && mongoose.Types.ObjectId.isValid(explicitTarget)) {
+        const col = await College.findById(explicitTarget).lean();
         if (!col) {
           return res.status(400).json({ success: false, code: 'INVALID_TENANT_TARGET', message: 'Target institution not found' });
         }
-        resolvedTenantId = targetTenantId;
+        resolvedTenantId = explicitTarget;
         isPlatformWide = false;
       } else {
         isPlatformWide = true;
