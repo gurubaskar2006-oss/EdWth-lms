@@ -710,7 +710,8 @@ export const LMSProvider = ({ children }) => {
         ...(matchedClientStudent || {}), 
         ...apiResult.user, 
         role: (apiResult.user.role || matchedClientStudent?.role || 'student').toLowerCase(),
-        mustChangePassword: mustChange 
+        mustChangePassword: mustChange,
+        token: apiResult.token || null
       };
       
       try {
@@ -749,7 +750,8 @@ export const LMSProvider = ({ children }) => {
         ...apiResult.user,
         isTwoFactorEnabled: apiResult.isTwoFactorEnabled ?? apiResult.user?.isTwoFactorEnabled ?? true,
         mfaSetupRequired: false,
-        mustChangePassword: mustChange
+        mustChangePassword: mustChange,
+        token: apiResult.token || null
       };
       try {
         localStorage.setItem('lumina_current_user', JSON.stringify(fullUser));
@@ -788,7 +790,17 @@ export const LMSProvider = ({ children }) => {
   };
 
   const handleForcedPasswordChange = async (newPassword, confirmPassword) => {
-    const activeToken = tempAuthTokenRef.current || getAuthToken();
+    let activeToken = tempAuthTokenRef.current || getAuthToken();
+    if (!activeToken && user?.token) {
+      activeToken = user.token;
+    }
+    if (!activeToken) {
+      try {
+        const storedUser = JSON.parse(localStorage.getItem('lumina_current_user') || '{}');
+        if (storedUser?.token) activeToken = storedUser.token;
+      } catch {}
+    }
+
     const res = await apiService.changePassword(newPassword, confirmPassword, '', activeToken);
     if (res && res.success) {
       if (res.token) {
@@ -799,7 +811,8 @@ export const LMSProvider = ({ children }) => {
         const updated = {
           ...prev,
           ...(res.user || {}),
-          mustChangePassword: false
+          mustChangePassword: false,
+          token: res.token || prev?.token || activeToken
         };
         try {
           localStorage.setItem('lumina_current_user', JSON.stringify(updated));

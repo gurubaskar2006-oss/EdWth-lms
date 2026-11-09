@@ -63,11 +63,29 @@ export const verifyToken = async (req, res, next) => {
   try {
     let headerToken = null;
     let headerSupplied = false;
-    if (req.headers.authorization && req.headers.authorization.startsWith('Bearer ')) {
+
+    const authHeader = req.headers.authorization || req.headers.Authorization;
+    if (authHeader && typeof authHeader === 'string' && authHeader.trim().toLowerCase().startsWith('bearer ')) {
       headerSupplied = true;
-      const parts = req.headers.authorization.split(' ');
-      if (parts.length === 2 && parts[1] && parts[1] !== 'null' && parts[1] !== 'undefined') {
+      const parts = authHeader.trim().split(/\s+/);
+      if (parts.length >= 2 && parts[1] && parts[1] !== 'null' && parts[1] !== 'undefined') {
         headerToken = parts[1].trim();
+      }
+    }
+
+    if (!headerToken && req.headers['x-auth-token']) {
+      const xToken = String(req.headers['x-auth-token']).trim();
+      if (xToken && xToken !== 'null' && xToken !== 'undefined') {
+        headerSupplied = true;
+        headerToken = xToken;
+      }
+    }
+
+    if (!headerToken && req.body && req.body.token) {
+      const bToken = String(req.body.token).trim();
+      if (bToken && bToken !== 'null' && bToken !== 'undefined') {
+        headerSupplied = true;
+        headerToken = bToken;
       }
     }
 

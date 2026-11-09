@@ -33,7 +33,12 @@ export const ForcedPasswordChangeModal = ({ isOpen }) => {
 
     const res = await handleForcedPasswordChange(newPassword, confirmPassword);
     if (!res.success) {
-      setError(res.message || 'Failed to update password. Please try again.');
+      const msg = res.message || 'Failed to update password. Please try again.';
+      setError(
+        msg.toLowerCase().includes('not authorized') || msg.toLowerCase().includes('no token')
+          ? 'Authentication session not found. Please sign out and sign in again to set your permanent password.'
+          : msg
+      );
       setLoading(false);
     }
   };
