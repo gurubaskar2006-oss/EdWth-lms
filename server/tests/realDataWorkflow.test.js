@@ -85,26 +85,7 @@ describe('Lumina LMS — 15-Step Real Data Integration & End-to-End Workflow', (
       domain: `beacon-${ts}.edu`
     });
 
-    // 3. Create real batches in Tenant A
-    batchClass10A = await Batch.create({
-      name: 'Class 10-A',
-      code: `C10A-${ts}`,
-      tenantId: tenantA._id,
-      academicTerm: '2026-Fall',
-      grade: '10',
-      section: 'A'
-    });
-
-    batchClass10B = await Batch.create({
-      name: 'Class 10-B',
-      code: `C10B-${ts}`,
-      tenantId: tenantA._id,
-      academicTerm: '2026-Fall',
-      grade: '10',
-      section: 'B'
-    });
-
-    // 4. Create Trainer User in Tenant A
+    // 3. Create Trainer User in Tenant A
     trainerUser = await User.create({
       name: 'Dr. Sarah Lin',
       email: `sarah.lin.${ts}@apex.edu`,
@@ -113,6 +94,27 @@ describe('Lumina LMS — 15-Step Real Data Integration & End-to-End Workflow', (
       tenantId: tenantA._id,
       tenantCode: tenantA.code,
       password: '$2b$10$abcdefghijklmnopqrstuv'
+    });
+
+    // 4. Create real batches in Tenant A
+    batchClass10A = await Batch.create({
+      name: 'Class 10-A',
+      code: `C10A-${ts}`,
+      tenantId: tenantA._id,
+      academicTerm: '2026-Fall',
+      grade: '10',
+      section: 'A',
+      assignedTrainers: [trainerUser._id]
+    });
+
+    batchClass10B = await Batch.create({
+      name: 'Class 10-B',
+      code: `C10B-${ts}`,
+      tenantId: tenantA._id,
+      academicTerm: '2026-Fall',
+      grade: '10',
+      section: 'B',
+      assignedTrainers: [trainerUser._id]
     });
 
     // 5. Create Student A in Tenant A (Class 10-A)

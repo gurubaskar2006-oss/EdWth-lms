@@ -48,7 +48,9 @@ describe('Lumina LMS — Student Profile Completion Workflow Test Suite', () => 
   let originalFindById;
   let originalFindByIdAndUpdate;
   let originalAuditLogCreate;
+  let originalAuditLogSave;
   let originalCollegeFindById;
+  let originalCollegeFindOne;
 
   beforeAll(() => {
     process.env.JWT_SECRET = JWT_SECRET;
@@ -143,17 +145,32 @@ describe('Lumina LMS — Student Profile Completion Workflow Test Suite', () => 
       };
     };
 
-    // Mock AuditLog.create
+    // Mock AuditLog.create & save
     originalAuditLogCreate = AuditLog.create;
     AuditLog.create = async () => ({ _id: new mongoose.Types.ObjectId() });
+    originalAuditLogSave = AuditLog.prototype.save;
+    AuditLog.prototype.save = async function () {
+      if (!this._id) this._id = new mongoose.Types.ObjectId();
+      return this;
+    };
 
-    // Mock College.findById
+    // Mock College.findById & College.findOne
     originalCollegeFindById = College.findById;
     College.findById = function() {
       return {
         select: () => ({
           lean: () => Promise.resolve({ name: 'Oakridge High School', code: 'OAKRIDGE', institutionType: 'school' })
         })
+      };
+    };
+    originalCollegeFindOne = College.findOne;
+    College.findOne = function() {
+      return {
+        select: () => ({
+          lean: () => Promise.resolve({ name: 'Oakridge High School', code: 'OAKRIDGE', institutionType: 'school' })
+        }),
+        lean: () => Promise.resolve({ name: 'Oakridge High School', code: 'OAKRIDGE', institutionType: 'school' }),
+        then: (onFulfilled) => Promise.resolve({ name: 'Oakridge High School', code: 'OAKRIDGE', institutionType: 'school' }).then(onFulfilled)
       };
     };
 
@@ -176,8 +193,14 @@ describe('Lumina LMS — Student Profile Completion Workflow Test Suite', () => 
     if (originalAuditLogCreate) {
       AuditLog.create = originalAuditLogCreate;
     }
+    if (originalAuditLogSave) {
+      AuditLog.prototype.save = originalAuditLogSave;
+    }
     if (originalCollegeFindById) {
       College.findById = originalCollegeFindById;
+    }
+    if (originalCollegeFindOne) {
+      College.findOne = originalCollegeFindOne;
     }
   });
 

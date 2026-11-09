@@ -29,6 +29,8 @@ import { verifyToken, requireRole } from '../middleware/authMiddleware.js';
 import trainerRoutes from '../routes/trainerRoutes.js';
 import adminRoutes from '../routes/adminRoutes.js';
 import User from '../models/User.js';
+import College from '../models/College.js';
+import AuditLog from '../models/AuditLog.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -52,6 +54,9 @@ describe('Company Operations & Security Hardening Test Suite', () => {
   let mockUsers = {};
   let originalFindById;
   let originalFindByIdAndUpdate;
+  let originalAuditSave;
+  let originalAuditCreate;
+  let originalCollegeFindOne;
 
   beforeAll(() => {
     process.env.JWT_SECRET = JWT_SECRET;
@@ -157,6 +162,28 @@ describe('Company Operations & Security Hardening Test Suite', () => {
       };
     };
 
+    // Mock AuditLog.create and AuditLog.prototype.save
+    originalAuditCreate = AuditLog.create;
+    AuditLog.create = async (doc) => ({ _id: new mongoose.Types.ObjectId(), ...doc });
+    originalAuditSave = AuditLog.prototype.save;
+    AuditLog.prototype.save = async function () {
+      if (!this._id) this._id = new mongoose.Types.ObjectId();
+      return this;
+    };
+
+    // Mock College.findOne for tenant resolution
+    originalCollegeFindOne = College.findOne;
+    College.findOne = function () {
+      const c = { _id: tenantAId, name: 'Oakridge School', institutionType: 'school' };
+      return {
+        select: () => ({
+          lean: () => Promise.resolve(c)
+        }),
+        lean: () => Promise.resolve(c),
+        then: (onFulfilled) => Promise.resolve(c).then(onFulfilled)
+      };
+    };
+
     // Build test express application
     app = express();
     app.use(express.json());
@@ -178,6 +205,15 @@ describe('Company Operations & Security Hardening Test Suite', () => {
     }
     if (originalFindByIdAndUpdate) {
       User.findByIdAndUpdate = originalFindByIdAndUpdate;
+    }
+    if (originalAuditCreate) {
+      AuditLog.create = originalAuditCreate;
+    }
+    if (originalAuditSave) {
+      AuditLog.prototype.save = originalAuditSave;
+    }
+    if (originalCollegeFindOne) {
+      College.findOne = originalCollegeFindOne;
     }
   });
 

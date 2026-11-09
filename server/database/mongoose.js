@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import dotenv from 'dotenv';
+import os from 'os';
 import { validateStagingMongoUri } from '../utils/stagingUriValidator.js';
 
 if (process.env.NODE_ENV !== 'production') {
@@ -61,6 +62,8 @@ export const getProductionConnectionOptions = (customOptions = {}) => {
     minPoolSize: 10,
     serverSelectionTimeoutMS,
     socketTimeoutMS: 45000,
+    runtimeAdapters: { os },
+    driverInfo: { name: 'nodejs', version: process.version },
     ...customOptions
   };
 };
@@ -120,6 +123,8 @@ export const connectDB = async (customOptions = {}) => {
         minPoolSize: 10,
         serverSelectionTimeoutMS: 15000,
         socketTimeoutMS: 45000,
+        runtimeAdapters: { os },
+        driverInfo: { name: 'nodejs', version: process.version },
         ...customOptions
       });
       console.log(`✅ [MongoDB Connected]: host=${conn.connection.host}, db=${conn.connection.name} (Durable storage)`);
@@ -157,6 +162,8 @@ export const connectDB = async (customOptions = {}) => {
     }
     const uri = mongodInstance.getUri();
     const conn = await mongoose.connect(uri, {
+      runtimeAdapters: { os },
+      driverInfo: { name: 'nodejs', version: process.version },
       ...customOptions
     });
     console.log(`⚠️ [MongoDB] Ephemeral In-Memory Database Initialized (NOT durable across restarts): ${uri}`);
