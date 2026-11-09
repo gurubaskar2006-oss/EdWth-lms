@@ -640,5 +640,65 @@ describe('Lumina LMS — Provision Teacher Modal & TenantId Flow Validation', ()
     expect(modalPassword).toBe('');
     expect(createdResult).toBeNull();
   });
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // TEST 7h: Static AST Scope Audit — AdminApp selectedInstitution Binding
+  // ───────────────────────────────────────────────────────────────────────────
+  it('7h. Confirms selectedInstitution is in scope in AdminApp and no ReferenceError can occur', async () => {
+    const fs = await import('fs');
+    const parser = await import('@babel/parser');
+    const traverseModule = await import('@babel/traverse');
+    const traverse = traverseModule.default?.default || traverseModule.default;
+
+    const adminAppCode = fs.readFileSync('src/AdminApp.jsx', 'utf8');
+    const ast = parser.parse(adminAppCode, {
+      sourceType: 'module',
+      plugins: ['jsx']
+    });
+
+    const standardGlobals = new Set([
+      'window', 'document', 'console', 'localStorage', 'sessionStorage',
+      'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval',
+      'fetch', 'alert', 'confirm', 'parseInt', 'parseFloat', 'Math', 'Date',
+      'Array', 'Object', 'String', 'Number', 'Boolean', 'Set', 'Map',
+      'JSON', 'RegExp', 'Error', 'Promise', 'navigator', 'location',
+      'btoa', 'atob', 'encodeURIComponent', 'decodeURIComponent',
+      'FormData', 'Blob', 'URL', 'Event', 'CustomEvent', 'import'
+    ]);
+
+    const undeclared = [];
+    traverse(ast, {
+      Program(progPath) {
+        progPath.traverse({
+          ReferencedIdentifier(identPath) {
+            const name = identPath.node.name;
+            if (standardGlobals.has(name)) return;
+            if (!identPath.scope.hasBinding(name)) {
+              undeclared.push({ name, line: identPath.node.loc.start.line });
+            }
+          }
+        });
+      }
+    });
+
+    expect(undeclared).toEqual([]);
+  });
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // TEST 7i: Unauthenticated and Authenticated Rendering Integrity
+  // ───────────────────────────────────────────────────────────────────────────
+  it('7i. Confirms AdminApp destructuring from useLMS includes selectedInstitution', async () => {
+    const fs = await import('fs');
+    const adminAppCode = fs.readFileSync('src/AdminApp.jsx', 'utf8');
+
+    // Confirm line destructuring includes selectedInstitution
+    const useLMSAdminAppRegex = /const\s*\{\s*([^}]+)\s*\}\s*=\s*useLMS\(\);?\s*(?:const\s*\[createBatchOpen)/;
+    const match = adminAppCode.match(useLMSAdminAppRegex);
+    expect(match).not.toBeNull();
+    const destructuredVars = match[1].split(',').map((v) => v.trim());
+    expect(destructuredVars).toContain('selectedInstitution');
+    expect(destructuredVars).toContain('isAuthenticated');
+    expect(destructuredVars).toContain('user');
+  });
 });
 

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useLMS } from '../context/LMSContext';
+import { apiService } from '../services/apiService';
 import {
   StickyNote,
   X,

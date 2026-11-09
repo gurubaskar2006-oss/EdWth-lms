@@ -1437,7 +1437,7 @@ const TrainerProvisioningView = ({ onOpenProvisionTrainer }) => {
 
 // ─── AdminApp Root ────────────────────────────────────────────────────────────
 export const AdminApp = () => {
-  const { activeTab, setActiveTab, isAuthenticated, user, logout, terms, addToast } = useLMS();
+  const { activeTab, setActiveTab, isAuthenticated, user, logout, terms, addToast, selectedInstitution } = useLMS();
   const [createBatchOpen, setCreateBatchOpen] = useState(false);
   const [provisionTrainerOpen, setProvisionTrainerOpen] = useState(false);
   const [mfaModalOpen, setMfaModalOpen] = useState(false);

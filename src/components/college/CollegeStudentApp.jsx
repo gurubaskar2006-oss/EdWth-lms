@@ -33,6 +33,7 @@ import { LeaderboardView } from '../../views/LeaderboardView';
 export const CollegeStudentApp = () => {
   const {
     activeTab,
+    setActiveTab,
     loginModalOpen,
     setLoginModalOpen,
     setCodingPanelOpen,

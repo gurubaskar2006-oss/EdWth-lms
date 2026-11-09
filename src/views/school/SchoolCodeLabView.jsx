@@ -560,8 +560,8 @@ export const SchoolCodeLabView = () => {
       setSolutionRevealed(false);
       addToast('Template Restored', `Restored starter template for "${activeExercise.title}".`, 'subtle');
     } else {
-      setCode(EMPTY_STARTER_CODE);
-      addToast('Editor Reset', 'Code editor restored to clean main.py state.', 'subtle');
+      setCode(FREEFORM_STARTERS[language] || FREEFORM_STARTERS.python);
+      addToast('Editor Reset', 'Code editor restored to clean template state.', 'subtle');
     }
     setStdout('');
     setStderr('');
