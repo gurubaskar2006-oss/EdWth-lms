@@ -9,6 +9,7 @@ import { SettingsView } from './views/SettingsView';
 import { UnauthenticatedView } from './components/UnauthenticatedView';
 import { MultiSchoolManagementView } from './views/MultiSchoolManagementView';
 import { MfaEnrollmentModal } from './components/MfaEnrollmentModal';
+import { ForcedPasswordChangeModal } from './components/ForcedPasswordChangeModal';
 import { BrandLogo } from './components/BrandLogo';
 import { apiService } from './services/apiService';
 import { getInstitutionConfig } from './config/institutionConfig';
@@ -1437,7 +1438,7 @@ const TrainerProvisioningView = ({ onOpenProvisionTrainer }) => {
 
 // ─── AdminApp Root ────────────────────────────────────────────────────────────
 export const AdminApp = () => {
-  const { activeTab, setActiveTab, isAuthenticated, user, logout, terms, addToast, selectedInstitution } = useLMS();
+  const { activeTab, setActiveTab, isAuthenticated, user, logout, terms, addToast, selectedInstitution, mustChangePasswordPromptOpen } = useLMS();
   const [createBatchOpen, setCreateBatchOpen] = useState(false);
   const [provisionTrainerOpen, setProvisionTrainerOpen] = useState(false);
   const [mfaModalOpen, setMfaModalOpen] = useState(false);
@@ -1739,6 +1740,8 @@ export const AdminApp = () => {
           setAdminRefreshKey((k) => k + 1);
         }}
       />
+
+      <ForcedPasswordChangeModal isOpen={mustChangePasswordPromptOpen} />
 
       <ToastNotifications />
     </div>

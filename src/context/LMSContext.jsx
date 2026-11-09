@@ -174,6 +174,14 @@ export const LMSProvider = ({ children }) => {
     }
   }, [user?.mustChangePassword]);
 
+  useEffect(() => {
+    const handleMustChangePassword = () => {
+      setMustChangePasswordPromptOpen(true);
+    };
+    window.addEventListener('lms_must_change_password', handleMustChangePassword);
+    return () => window.removeEventListener('lms_must_change_password', handleMustChangePassword);
+  }, []);
+
   // Hydrate data from backend server if available
   useEffect(() => {
     const fetchBackendData = async () => {

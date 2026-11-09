@@ -9,6 +9,7 @@ import { TrainerAttendanceView } from './views/TrainerAttendanceView';
 import { StudentsDataSheetView } from './views/StudentsDataSheetView';
 import { SchoolTeacherStudentsView } from './views/trainer/SchoolTeacherStudentsView';
 import { AcademicCalendarView } from './views/trainer/AcademicCalendarView';
+import { ForcedPasswordChangeModal } from './components/ForcedPasswordChangeModal';
 import { BrandLogo } from './components/BrandLogo';
 import { apiService } from './services/apiService';
 import { socketService } from './services/socketService';
@@ -1122,7 +1123,7 @@ const BatchProgressView = () => {
 
 // ─── TrainerApp Root ──────────────────────────────────────────────────────────
 export const TrainerApp = () => {
-  const { activeTab, setActiveTab, isAuthenticated, user, logout, terms, addToast } = useLMS();
+  const { activeTab, setActiveTab, isAuthenticated, user, logout, terms, addToast, mustChangePasswordPromptOpen } = useLMS();
   const [selectedSubmission, setSelectedSubmission] = useState(null);
   const [assessmentAlerts, setAssessmentAlerts] = useState([]);
 
@@ -1457,6 +1458,7 @@ export const TrainerApp = () => {
         }}
       />
 
+      <ForcedPasswordChangeModal isOpen={mustChangePasswordPromptOpen} />
       <ToastNotifications />
     </div>
   );

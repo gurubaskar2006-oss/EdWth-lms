@@ -1,3 +1,5 @@
+import { executeInBrowserSandbox } from './browserCodeRunner.js';
+
 const BACKEND_URL = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_BACKEND_URL ? import.meta.env.VITE_BACKEND_URL : '').replace(/\/$/, '');
 const API_BASE_URL = `${BACKEND_URL}/api/v1`;
 
@@ -243,6 +245,8 @@ export const apiService = {
             window.dispatchEvent(new CustomEvent('lms_session_expired'));
           } else if (data && (data.code === 'MFA_SETUP_REQUIRED' || (data.message && data.message.includes('Multi-factor authentication enrollment')))) {
             window.dispatchEvent(new CustomEvent('lms_mfa_setup_required', { detail: data }));
+          } else if (data && (data.code === 'MUST_CHANGE_PASSWORD' || (data.message && data.message.includes('Password change is required')))) {
+            window.dispatchEvent(new CustomEvent('lms_must_change_password', { detail: data }));
           } else if (data && data.code === 'INSUFFICIENT_PRIVILEGES') {
             window.dispatchEvent(new CustomEvent('lms_insufficient_privileges', { detail: { url: targetUrl, data } }));
           }
@@ -756,9 +760,22 @@ export const apiService = {
           files: [{ name: 'main', content: code }]
         })
       });
-      return await res.json();
+      const data = await res.json().catch(() => null);
+      if (res.ok && data?.success && !data?.data?.run?.output?.includes('[Dev Notice')) {
+        return data;
+      }
+      // If backend runner is unavailable (503 / ISOLATED_RUNNER_UNAVAILABLE / offline notice), fall back to browser sandbox
+      const clientResult = await executeInBrowserSandbox(language, code);
+      if (clientResult?.success) {
+        return clientResult;
+      }
+      return data || { success: false, message: 'Execution runner unavailable.' };
     } catch (e) {
-      console.error('Execution error:', e);
+      console.warn('Backend execution unavailable, switching to browser sandbox:', e.message);
+      const clientResult = await executeInBrowserSandbox(language, code);
+      if (clientResult?.success) {
+        return clientResult;
+      }
       return { success: false, message: 'Network error during code execution.' };
     }
   },

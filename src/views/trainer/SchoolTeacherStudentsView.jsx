@@ -24,7 +24,7 @@ import {
 } from 'lucide-react';
 
 export const SchoolTeacherStudentsView = () => {
-  const { addToast } = useLMS();
+  const { addToast, mustChangePasswordPromptOpen, setMustChangePasswordPromptOpen } = useLMS();
   const [students, setStudents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -99,7 +99,11 @@ export const SchoolTeacherStudentsView = () => {
       if (res?.success && Array.isArray(res.students)) {
         setStudents(res.students);
       } else {
-        setError(res?.message || 'Failed to load students.');
+        const msg = res?.message || 'Failed to load students.';
+        setError(msg);
+        if (res?.code === 'MUST_CHANGE_PASSWORD' || msg.includes('Password change is required')) {
+          setMustChangePasswordPromptOpen(true);
+        }
       }
     } catch (err) {
       console.error(err);
@@ -112,6 +116,13 @@ export const SchoolTeacherStudentsView = () => {
   useEffect(() => {
     fetchStudents();
   }, []);
+
+  // Automatically reload roster when forced password change completes
+  useEffect(() => {
+    if (!mustChangePasswordPromptOpen && error && error.includes('Password change is required')) {
+      fetchStudents();
+    }
+  }, [mustChangePasswordPromptOpen]);
 
   // Unique classes for filter dropdown
   const uniqueClasses = useMemo(() => {
@@ -315,9 +326,24 @@ export const SchoolTeacherStudentsView = () => {
           <p style={{ color: 'var(--text-secondary)', fontSize: '0.86rem', maxWidth: '420px', margin: '0 auto 1.25rem' }}>
             {error}
           </p>
-          <button onClick={fetchStudents} className="btn-primary" style={{ padding: '0.45rem 1.25rem' }}>
-            Retry Request
-          </button>
+          {error.includes('Password change is required') ? (
+            <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center', flexWrap: 'wrap' }}>
+              <button
+                onClick={() => setMustChangePasswordPromptOpen(true)}
+                className="btn-primary"
+                style={{ padding: '0.5rem 1.5rem', backgroundColor: '#F58212', borderColor: '#F58212' }}
+              >
+                Change Password Now
+              </button>
+              <button onClick={fetchStudents} className="btn-secondary" style={{ padding: '0.5rem 1.25rem' }}>
+                Retry Request
+              </button>
+            </div>
+          ) : (
+            <button onClick={fetchStudents} className="btn-primary" style={{ padding: '0.45rem 1.25rem' }}>
+              Retry Request
+            </button>
+          )}
         </div>
       ) : filteredStudents.length === 0 ? (
         <div className="card" style={{ padding: '3.5rem 2rem', textAlign: 'center' }}>
