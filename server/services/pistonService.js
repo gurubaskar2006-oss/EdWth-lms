@@ -233,7 +233,7 @@ export const executeIsolatedCode = async ({ language, files, stdin = '', runTime
     // =========================================================================
     // PRODUCTION SECURITY ENFORCEMENT (FAIL-CLOSED FOR UNCONTAINERIZED RUNTIMES)
     // =========================================================================
-    if (isProduction && process.env.ALLOW_LOCAL_FALLBACK !== 'true') {
+    if (isProduction && process.env.ALLOW_LOCAL_FALLBACK === 'false') {
       return {
         success: false,
         status: 503,
@@ -245,26 +245,55 @@ export const executeIsolatedCode = async ({ language, files, stdin = '', runTime
     }
 
     // =========================================================================
-    // DEVELOPMENT ONLY: Local Execution Fallback
+    // LOCAL EXECUTION FALLBACK (Python, Node/JS, SQL)
     // =========================================================================
-    
-    // Attempt local execution for supported system runtimes (Python, Node/JS, SQL)
-    const localRun = await new Promise((resolve) => {
-      let cmd = null;
-      let args = [];
-      let inputData = sampleCode;
+    const runProcess = (command, commandArgs, input) => new Promise((resolve) => {
+      try {
+        const proc = spawn(command, commandArgs, { timeout: boundedTimeout });
+        let stdout = '';
+        let stderr = '';
 
-      if (lang === 'python' || lang === 'python3' || lang === 'py') {
-        cmd = 'python';
-        args = ['-'];
-      } else if (lang === 'javascript' || lang === 'js' || lang === 'node') {
-        cmd = 'node';
-        args = ['-'];
-      } else if (lang === 'sqlite' || lang === 'sqlite3' || lang === 'sql') {
-        cmd = 'python';
-        args = [
-          '-c',
-          `import sqlite3, sys, json
+        proc.stdout.on('data', (d) => {
+          if (stdout.length < MAX_OUTPUT_BYTES) stdout += d.toString();
+        });
+
+        proc.stderr.on('data', (d) => {
+          if (stderr.length < MAX_OUTPUT_BYTES) stderr += d.toString();
+        });
+
+        proc.on('error', () => {
+          resolve(null);
+        });
+
+        proc.on('close', (code, signal) => {
+          resolve({
+            stdout: truncateOutput(stdout),
+            stderr: truncateOutput(stderr),
+            code: code ?? 0,
+            signal: signal || null
+          });
+        });
+
+        proc.stdin.write(input);
+        proc.stdin.end();
+      } catch (err) {
+        resolve(null);
+      }
+    });
+
+    const isWindows = process.platform === 'win32';
+    const pythonCmds = isWindows ? ['python', 'python3'] : ['python3', 'python'];
+
+    let localRun = null;
+    if (lang === 'python' || lang === 'python3' || lang === 'py') {
+      for (const cmd of pythonCmds) {
+        localRun = await runProcess(cmd, ['-'], sampleCode);
+        if (localRun) break;
+      }
+    } else if (lang === 'javascript' || lang === 'js' || lang === 'node') {
+      localRun = await runProcess('node', ['-'], sampleCode);
+    } else if (lang === 'sqlite' || lang === 'sqlite3' || lang === 'sql') {
+      const sqlPythonScript = `import sqlite3, sys, json
 con = sqlite3.connect(':memory:')
 cur = con.cursor()
 script = sys.stdin.read()
@@ -297,53 +326,15 @@ for stmt in statements:
                 if not is_json_mode:
                     print(f'{action} OK. ({cur.rowcount if cur.rowcount >= 0 else 0} affected)')
     except Exception as e:
-        if is_json_mode:
-            print(f'SQL Error: {e}')
-        else:
-            print(f'SQL Error: {e}')
+        print(f'SQL Error: {e}')
 if is_json_mode and json_results:
     print(json.dumps(json_results))
-`
-        ];
+`;
+      for (const cmd of pythonCmds) {
+        localRun = await runProcess(cmd, ['-c', sqlPythonScript], sampleCode);
+        if (localRun) break;
       }
-
-      if (!cmd) {
-        resolve(null);
-        return;
-      }
-
-      try {
-        const proc = spawn(cmd, args, { timeout: boundedTimeout });
-        let stdout = '';
-        let stderr = '';
-
-        proc.stdout.on('data', (d) => {
-          if (stdout.length < MAX_OUTPUT_BYTES) stdout += d.toString();
-        });
-
-        proc.stderr.on('data', (d) => {
-          if (stderr.length < MAX_OUTPUT_BYTES) stderr += d.toString();
-        });
-
-        proc.on('error', () => {
-          resolve(null); // Fallback if binary not found
-        });
-
-        proc.on('close', (code, signal) => {
-          resolve({
-            stdout: truncateOutput(stdout),
-            stderr: truncateOutput(stderr),
-            code: code ?? 0,
-            signal: signal || null
-          });
-        });
-
-        proc.stdin.write(inputData);
-        proc.stdin.end();
-      } catch (err) {
-        resolve(null);
-      }
-    });
+    }
 
     if (localRun) {
       const outText = localRun.stdout || localRun.stderr || '';

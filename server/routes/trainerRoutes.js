@@ -333,21 +333,40 @@ router.get('/students', async (req, res) => {
     const query = { ...tenantFilter, role: 'student', soft_deleted: { $ne: true } };
 
     if (req.user.role === 'trainer' || req.user.role === 'teacher') {
+      const trainerOid = (req.user._id && mongoose.Types.ObjectId.isValid(req.user._id))
+        ? new mongoose.Types.ObjectId(req.user._id)
+        : req.user._id;
+
+      const userBatchOid = (req.user.batchId && mongoose.Types.ObjectId.isValid(req.user.batchId))
+        ? new mongoose.Types.ObjectId(req.user.batchId)
+        : null;
+
       const assignedBatches = await Batch.find({
         tenantId: req.tenantId,
         $or: [
-          ...(req.user.batchId ? [{ _id: req.user.batchId }] : []),
+          ...(userBatchOid ? [{ _id: userBatchOid }] : []),
+          { assignedTrainers: trainerOid },
           { assignedTrainers: req.user._id }
         ]
-      }).select('_id').lean();
+      }).select('_id name targetClass').lean();
 
       const batchIds = assignedBatches.map((b) => b._id);
-      if (req.user.batchId && !batchIds.some((id) => id.toString() === req.user.batchId.toString())) {
-        batchIds.push(req.user.batchId);
+      if (userBatchOid && !batchIds.some((id) => id.toString() === userBatchOid.toString())) {
+        batchIds.push(userBatchOid);
       }
 
       if (batchIds.length > 0) {
-        query.batchId = { $in: batchIds };
+        const batchNames = assignedBatches.map((b) => b.name).filter(Boolean);
+        const targetClasses = assignedBatches.map((b) => b.targetClass).filter(Boolean);
+        const classNames = [...new Set([...batchNames, ...targetClasses])];
+
+        query.$or = [
+          { batchId: { $in: batchIds } },
+          ...(classNames.length > 0 ? [
+            { className: { $in: classNames } },
+            { batch: { $in: classNames } }
+          ] : [])
+        ];
       } else {
         // Strict boundary: When educator has no assigned cohorts in this tenant, return empty list
         return res.json({ success: true, count: 0, students: [] });
@@ -840,19 +859,33 @@ router.get('/analytics', async (req, res) => {
     const tenantFilter = isSuperAdmin ? (req.query.tenantId ? { tenantId: req.query.tenantId } : {}) : { tenantId: req.tenantId };
 
     let batchIds = [];
+    let cohortClassNames = [];
     if (isTrainerOrTeacher) {
+      const trainerOid = (req.user._id && mongoose.Types.ObjectId.isValid(req.user._id))
+        ? new mongoose.Types.ObjectId(req.user._id)
+        : req.user._id;
+
+      const userBatchOid = (req.user.batchId && mongoose.Types.ObjectId.isValid(req.user.batchId))
+        ? new mongoose.Types.ObjectId(req.user.batchId)
+        : null;
+
       const assignedBatches = await Batch.find({
         tenantId: req.tenantId,
         $or: [
-          ...(req.user.batchId ? [{ _id: req.user.batchId }] : []),
+          ...(userBatchOid ? [{ _id: userBatchOid }] : []),
+          { assignedTrainers: trainerOid },
           { assignedTrainers: req.user._id }
         ]
-      }).select('_id').lean();
+      }).select('_id name targetClass').lean();
 
       batchIds = assignedBatches.map((b) => b._id);
-      if (req.user.batchId && !batchIds.some((id) => id.toString() === req.user.batchId.toString())) {
-        batchIds.push(req.user.batchId);
+      if (userBatchOid && !batchIds.some((id) => id.toString() === userBatchOid.toString())) {
+        batchIds.push(userBatchOid);
       }
+
+      const batchNames = assignedBatches.map((b) => b.name).filter(Boolean);
+      const targetClasses = assignedBatches.map((b) => b.targetClass).filter(Boolean);
+      cohortClassNames = [...new Set([...batchNames, ...targetClasses])];
 
       // If an authenticated trainer/teacher has NO assigned cohort, return genuine zero-value metrics
       if (batchIds.length === 0) {
@@ -874,7 +907,13 @@ router.get('/analytics', async (req, res) => {
 
     const studentFilter = { ...tenantFilter, role: 'student', soft_deleted: { $ne: true } };
     if (isTrainerOrTeacher && batchIds.length > 0) {
-      studentFilter.batchId = { $in: batchIds };
+      studentFilter.$or = [
+        { batchId: { $in: batchIds } },
+        ...(cohortClassNames.length > 0 ? [
+          { className: { $in: cohortClassNames } },
+          { batch: { $in: cohortClassNames } }
+        ] : [])
+      ];
     }
 
     // Build attendance query scoped to cohort / tenant
@@ -1701,17 +1740,26 @@ router.get('/classes', async (req, res) => {
     const tenantFilter = { tenantId: req.tenantId };
     const batchFilter = { ...tenantFilter, status: { $ne: 'deleted' } };
     if (req.user.role === 'trainer' || req.user.role === 'teacher') {
+      const trainerOid = (req.user._id && mongoose.Types.ObjectId.isValid(req.user._id))
+        ? new mongoose.Types.ObjectId(req.user._id)
+        : req.user._id;
+
+      const userBatchOid = (req.user.batchId && mongoose.Types.ObjectId.isValid(req.user.batchId))
+        ? new mongoose.Types.ObjectId(req.user.batchId)
+        : null;
+
       const assignedBatches = await Batch.find({
         tenantId: req.tenantId,
         $or: [
-          ...(req.user.batchId ? [{ _id: req.user.batchId }] : []),
+          ...(userBatchOid ? [{ _id: userBatchOid }] : []),
+          { assignedTrainers: trainerOid },
           { assignedTrainers: req.user._id }
         ]
       }).select('_id').lean();
 
       const batchIds = assignedBatches.map((b) => b._id);
-      if (req.user.batchId && !batchIds.some((id) => id.toString() === req.user.batchId.toString())) {
-        batchIds.push(req.user.batchId);
+      if (userBatchOid && !batchIds.some((id) => id.toString() === userBatchOid.toString())) {
+        batchIds.push(userBatchOid);
       }
 
       if (batchIds.length > 0) {
@@ -1724,19 +1772,23 @@ router.get('/classes', async (req, res) => {
 
     const classesList = await Promise.all(
       batches.map(async (b) => {
-        const studentCount = await User.countDocuments({
+        const classNamesForBatch = [b.name, b.targetClass].filter(Boolean);
+        const batchStudentQuery = {
           tenantId: req.tenantId,
-          batchId: b._id,
           role: 'student',
-          soft_deleted: { $ne: true }
-        });
+          soft_deleted: { $ne: true },
+          $or: [
+            { batchId: b._id },
+            ...(classNamesForBatch.length > 0 ? [
+              { className: { $in: classNamesForBatch } },
+              { batch: { $in: classNamesForBatch } }
+            ] : [])
+          ]
+        };
 
-        const repUser = await User.findOne({
-          tenantId: req.tenantId,
-          batchId: b._id,
-          role: 'student',
-          soft_deleted: { $ne: true }
-        })
+        const studentCount = await User.countDocuments(batchStudentQuery);
+
+        const repUser = await User.findOne(batchStudentQuery)
           .sort({ name: 1 })
           .select('name')
           .lean();
