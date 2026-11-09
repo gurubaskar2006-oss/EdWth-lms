@@ -99,6 +99,34 @@ export const setAuthToken = (token) => {
 };
 
 /**
+ * Authoritatively resolves the active tenant ID from session storage or authenticated user.
+ */
+export const getActiveTenantId = () => {
+  try {
+    if (typeof window === 'undefined') return null;
+    const storedInst = sessionStorage.getItem('lumina_selected_institution');
+    if (storedInst) {
+      const parsed = JSON.parse(storedInst);
+      const instId = parsed?._id || parsed?.id;
+      if (instId && typeof instId === 'string' && instId !== 'null' && instId !== 'undefined') {
+        return instId;
+      }
+    }
+    const storedUser = localStorage.getItem('lumina_current_user');
+    if (storedUser) {
+      const parsedUser = JSON.parse(storedUser);
+      const userTenant = parsedUser?.tenantId?._id || parsedUser?.tenantId;
+      if (userTenant && typeof userTenant === 'string' && userTenant !== 'null' && userTenant !== 'undefined') {
+        return userTenant;
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
+};
+
+/**
  * Normalizes relative and absolute API request targets against the configured backend.
  */
 export const normalizeApiUrl = (url) => {
@@ -155,6 +183,9 @@ export const apiService = {
     const token = getAuthToken();
     const authHeader = token ? { 'Authorization': `Bearer ${token}` } : {};
 
+    const activeTenantId = getActiveTenantId();
+    const tenantHeader = activeTenantId ? { 'x-tenant-id': activeTenantId } : {};
+
     const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData;
     const defaultHeaders = isFormData ? {} : { 'Content-Type': 'application/json' };
 
@@ -179,6 +210,7 @@ export const apiService = {
         headers: {
           ...defaultHeaders,
           ...authHeader,
+          ...tenantHeader,
           ...options.headers,
         }
       });

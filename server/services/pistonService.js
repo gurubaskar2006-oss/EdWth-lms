@@ -114,6 +114,68 @@ const executeWandboxCpp = async ({ code, stdin = '', timeoutMs = DEFAULT_TIMEOUT
 };
 
 /**
+ * Execute code inside isolated Judge0 container sandbox (public CE engine)
+ */
+const JUDGE0_LANG_MAP = {
+  'c++': 54, // C++ (GCC 9.2.0)
+  'cpp': 54,
+  'c': 50,   // C (GCC 9.2.0)
+  'java': 62, // Java (OpenJDK 13.0.1)
+  'python': 71, // Python (3.8.1)
+  'python3': 71,
+  'py': 71,
+  'javascript': 63, // JavaScript (Node.js 12.14.0)
+  'js': 63,
+  'node': 63,
+  'bash': 46, // Bash (5.0.0)
+  'sqlite': 82, // SQL (SQLite 3.27.2)
+  'sqlite3': 82,
+  'sql': 82
+};
+
+const executeJudge0 = async ({ language, code, stdin = '', timeoutMs = DEFAULT_TIMEOUT_MS }) => {
+  const langKey = (language || '').toLowerCase().trim();
+  const langId = JUDGE0_LANG_MAP[langKey];
+  if (!langId) return null;
+
+  try {
+    const controller = new AbortController();
+    const timeoutHandle = setTimeout(() => controller.abort(), Math.min(timeoutMs + 4000, 15000));
+
+    const response = await fetch('https://ce.judge0.com/submissions?base64_encoded=false&wait=true', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        source_code: String(code || ''),
+        language_id: langId,
+        stdin: String(stdin || '')
+      }),
+      signal: controller.signal
+    });
+
+    clearTimeout(timeoutHandle);
+
+    if (!response.ok) return null;
+    const data = await response.json();
+
+    const stdout = truncateOutput(data.stdout || '');
+    const stderr = truncateOutput(data.stderr || data.compile_output || data.message || '');
+    const exitCode = data.status?.id === 3 ? 0 : (data.exit_code ?? 1);
+    const rawOutput = stdout || stderr || (data.status?.description || 'Executed');
+
+    return {
+      stdout,
+      stderr,
+      output: truncateOutput(rawOutput),
+      code: exitCode,
+      signal: null
+    };
+  } catch (err) {
+    return null;
+  }
+};
+
+/**
  * Execute code inside isolated Piston sandbox container
  */
 export const executeIsolatedCode = async ({ language, files, stdin = '', runTimeout = DEFAULT_TIMEOUT_MS }) => {
@@ -205,12 +267,32 @@ export const executeIsolatedCode = async ({ language, files, stdin = '', runTime
     workerStatusCache.set(workerUrl, { isOnline: false, lastChecked: Date.now() });
 
     // =========================================================================
-    // C++ CONTAINER SANDBOX FALLBACK (Wandbox isolated GCC runner)
+    // ISOLATED CONTAINER SANDBOX FALLBACK (Judge0 CE / Wandbox)
     // =========================================================================
     const sampleCode = formattedFiles[0]?.content || '';
     const lang = (runtime.language || '').toLowerCase();
-    const isCpp = lang === 'c++' || lang === 'cpp' || lang === 'c';
 
+    // 1. Try Judge0 container sandbox (C++, C, Java, Python, JS, Bash, SQLite)
+    const judge0Result = await executeJudge0({
+      language: runtime.language,
+      code: sampleCode,
+      stdin,
+      timeoutMs: boundedTimeout
+    });
+
+    if (judge0Result) {
+      return {
+        success: true,
+        data: {
+          language: runtime.language,
+          version: `${runtime.version} (Judge0 Isolated Sandbox)`,
+          run: judge0Result
+        }
+      };
+    }
+
+    // 2. Secondary C++ compiler fallback (Wandbox isolated GCC runner)
+    const isCpp = lang === 'c++' || lang === 'cpp' || lang === 'c';
     if (isCpp) {
       const wandboxResult = await executeWandboxCpp({
         code: sampleCode,
