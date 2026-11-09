@@ -384,19 +384,9 @@ router.post('/trainers', async (req, res) => {
       }
     }
 
-    // SECURITY: Enforce approved privileged identity policy for trainers / teachers
-    const targetRole = rest.role === 'teacher' ? 'teacher' : 'trainer';
-    const identityCheck = validatePrivilegedIdentity(cleanEmail, targetRole);
-    if (!identityCheck.allowed) {
-      return res.status(403).json({
-        success: false,
-        code: 'UNAUTHORIZED_PRIVILEGED_IDENTITY',
-        message: identityCheck.reason || 'Educator accounts require an authorized organizational identity or approved email domain.'
-      });
-    }
-
     // SECURITY: Validate and resolve target tenant institution
     let targetTenantId = null;
+    let targetCollege = null;
 
     if (req.user.role === 'superadmin') {
       const tenantParam = req.body.tenantId || req.body.collegeId;
@@ -414,7 +404,7 @@ router.post('/trainers', async (req, res) => {
           message: 'Invalid target institution identifier.'
         });
       }
-      const targetCollege = await College.findOne({ _id: tenantParam, status: 'active' });
+      targetCollege = await College.findOne({ _id: tenantParam, status: 'active' });
       if (!targetCollege) {
         return res.status(404).json({
           success: false,
@@ -431,8 +421,8 @@ router.post('/trainers', async (req, res) => {
           message: 'Administrator does not belong to a valid tenant institution.'
         });
       }
-      const adminCollege = await College.findOne({ _id: req.tenantId, status: 'active' });
-      if (!adminCollege) {
+      targetCollege = await College.findOne({ _id: req.tenantId, status: 'active' });
+      if (!targetCollege) {
         return res.status(404).json({
           success: false,
           code: 'TENANT_NOT_FOUND_OR_INACTIVE',
@@ -440,12 +430,26 @@ router.post('/trainers', async (req, res) => {
         });
       }
       // Ordinary admin cannot provision for any other institution; strictly use own verified tenant
-      targetTenantId = adminCollege._id;
+      targetTenantId = targetCollege._id;
     } else {
       return res.status(403).json({
         success: false,
         code: 'INSUFFICIENT_PRIVILEGES',
         message: 'Only authorized administrators may provision faculty accounts.'
+      });
+    }
+
+    // Determine educator role: explicit role overrides, otherwise infer from target institution type
+    const isSchool = targetCollege?.institutionType === 'school';
+    const targetRole = rest.role === 'teacher' || (!rest.role && isSchool) ? 'teacher' : 'trainer';
+
+    // SECURITY: Enforce approved privileged identity policy for trainers / teachers
+    const identityCheck = validatePrivilegedIdentity(cleanEmail, targetRole);
+    if (!identityCheck.allowed) {
+      return res.status(403).json({
+        success: false,
+        code: 'UNAUTHORIZED_PRIVILEGED_IDENTITY',
+        message: identityCheck.reason || 'Educator accounts require an authorized organizational identity or approved email domain.'
       });
     }
 

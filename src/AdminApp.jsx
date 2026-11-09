@@ -11,6 +11,7 @@ import { MultiSchoolManagementView } from './views/MultiSchoolManagementView';
 import { MfaEnrollmentModal } from './components/MfaEnrollmentModal';
 import { BrandLogo } from './components/BrandLogo';
 import { apiService } from './services/apiService';
+import { getInstitutionConfig } from './config/institutionConfig';
 import {
   InstitutionAnalyticsView,
   AdministratorsView,
@@ -221,14 +222,93 @@ const CreateBatchModal = ({ isOpen, onClose, onCreated, terms }) => {
 };
 
 // ─── Provision Trainer Modal ──────────────────────────────────────────────────
-const ProvisionTrainerModal = ({ isOpen, onClose, onCreated, terms }) => {
+const ProvisionTrainerModal = ({ isOpen, onClose, onCreated, terms: propTerms, user: propUser, selectedInstitution: propSelectedInstitution }) => {
+  const lms = useLMS();
+  const user = propUser || lms?.user;
+  const contextSelectedInstitution = propSelectedInstitution || lms?.selectedInstitution;
+  const terms = propTerms || lms?.terms;
+  const isSuperAdmin = (user?.role || '').toLowerCase() === 'superadmin';
+
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [department, setDepartment] = useState('School of Computing');
   const [password, setPassword] = useState('');
+  const [targetTenantId, setTargetTenantId] = useState('');
+  const [institutions, setInstitutions] = useState([]);
+  const [isLoadingInstitutions, setIsLoadingInstitutions] = useState(false);
+  const [institutionsError, setInstitutionsError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [createdResult, setCreatedResult] = useState(null);
+
+  // Load available institutions when modal opens for SuperAdmin
+  useEffect(() => {
+    if (!isOpen) {
+      setName('');
+      setEmail('');
+      setPassword('');
+      setError('');
+      setCreatedResult(null);
+      setInstitutionsError('');
+      return;
+    }
+
+    if (isSuperAdmin) {
+      setIsLoadingInstitutions(true);
+      setInstitutionsError('');
+      apiService.getAdminInstitutions()
+        .then((data) => {
+          if (data?.success && Array.isArray(data.institutions)) {
+            const activeOnly = data.institutions.filter((i) => i.status === 'active');
+            setInstitutions(activeOnly);
+
+            // Pre-select existing context institution if valid
+            const preselectedId = contextSelectedInstitution?._id || contextSelectedInstitution?.id;
+            if (preselectedId && activeOnly.some((i) => (i._id || i.id) === preselectedId)) {
+              setTargetTenantId(preselectedId);
+            } else if (activeOnly.length === 1) {
+              setTargetTenantId(activeOnly[0]._id || activeOnly[0].id);
+            } else {
+              setTargetTenantId('');
+            }
+          } else {
+            setInstitutions([]);
+            setInstitutionsError(data?.message || 'Unable to load institutions directory.');
+          }
+        })
+        .catch(() => {
+          setInstitutions([]);
+          setInstitutionsError('Network error loading institutions directory.');
+        })
+        .finally(() => {
+          setIsLoadingInstitutions(false);
+        });
+    } else {
+      // Institution / Tenant Admin uses authenticated tenant context directly
+      setTargetTenantId(user?.tenantId || '');
+    }
+  }, [isOpen, isSuperAdmin, contextSelectedInstitution?._id, contextSelectedInstitution?.id, user?.tenantId]);
+
+  // Derive selected institution object and dynamic terminology
+  const chosenInstitution = isSuperAdmin
+    ? institutions.find((i) => (i._id || i.id) === targetTenantId) || null
+    : (contextSelectedInstitution || null);
+
+  const effectiveType = isSuperAdmin
+    ? chosenInstitution?.institutionType
+    : (user?.institutionType || contextSelectedInstitution?.institutionType || terms?.institutionType);
+
+  const effectiveTerms = getInstitutionConfig(effectiveType || 'college');
+  const isSchool = effectiveType === 'school';
+
+  // Synchronize department default with institution mode
+  useEffect(() => {
+    if (isSchool && department === 'School of Computing') {
+      setDepartment('Academics');
+    } else if (!isSchool && department === 'Academics') {
+      setDepartment('School of Computing');
+    }
+  }, [isSchool]);
 
   if (!isOpen) return null;
 
@@ -238,31 +318,48 @@ const ProvisionTrainerModal = ({ isOpen, onClose, onCreated, terms }) => {
       setError('Name and Email are required.');
       return;
     }
+
+    if (isSuperAdmin && !targetTenantId) {
+      setError('Target institution (tenantId) is required when provisioning an educator.');
+      return;
+    }
+
     setIsSubmitting(true);
     setError('');
 
     try {
-      const data = await apiService.createAdminTrainer({
+      const payload = {
         name: name.trim(),
         email: email.trim().toLowerCase(),
-        department,
-        password
-      });
+        department: department.trim(),
+        password,
+        role: isSchool ? 'teacher' : 'trainer'
+      };
+
+      if (isSuperAdmin && targetTenantId) {
+        payload.tenantId = targetTenantId;
+        payload.collegeId = targetTenantId;
+      }
+
+      const data = await apiService.createAdminTrainer(payload);
       if (data && data.success) {
         onCreated(data.trainer);
         setCreatedResult({
           trainer: data.trainer,
-          temporaryPassword: data.temporaryPassword || password
+          temporaryPassword: data.temporaryPassword || password,
+          institutionName: chosenInstitution?.name || user?.tenantName || 'Assigned Institution'
         });
       } else {
-        setError(data?.message || 'Failed to provision trainer.');
+        setError(data?.message || 'Failed to provision faculty account.');
       }
     } catch {
-      setError('Network error while provisioning trainer.');
+      setError('Network error while provisioning faculty account.');
     } finally {
       setIsSubmitting(false);
     }
   };
+
+  const isFormDisabled = isSubmitting || (isSuperAdmin && (!targetTenantId || isLoadingInstitutions || institutions.length === 0));
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -274,10 +371,12 @@ const ProvisionTrainerModal = ({ isOpen, onClose, onCreated, terms }) => {
             </div>
             <div>
               <h3 style={{ fontSize: '1.15rem', color: 'var(--text-primary)', margin: 0, fontWeight: 700 }}>
-                Provision {terms?.educatorLabel || 'Trainer'}
+                Provision {effectiveTerms?.educatorLabel || 'Trainer'}
               </h3>
               <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', margin: '2px 0 0' }}>
-                Add authorized faculty to your institution
+                {isSuperAdmin
+                  ? (chosenInstitution ? `Add faculty to ${chosenInstitution.name}` : 'Assign authorized faculty to a target institution')
+                  : `Add authorized faculty to ${user?.tenantName || 'your institution'}`}
               </p>
             </div>
           </div>
@@ -290,10 +389,15 @@ const ProvisionTrainerModal = ({ isOpen, onClose, onCreated, terms }) => {
               <CheckCircle2 size={26} color="#059669" />
             </div>
             <h4 style={{ fontSize: '1.05rem', color: 'var(--text-primary)', margin: 0 }}>
-              Faculty Account Provisioned!
+              {effectiveTerms?.educatorLabel || 'Faculty'} Account Provisioned!
             </h4>
             <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', margin: 0 }}>
               {createdResult.trainer.name} ({createdResult.trainer.email})
+              {createdResult.institutionName && (
+                <span style={{ display: 'block', marginTop: '4px', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                  {createdResult.institutionName} · {createdResult.trainer.role === 'teacher' ? 'Class Teacher' : 'Faculty Trainer'}
+                </span>
+              )}
             </p>
             <div style={{ padding: '0.85rem', backgroundColor: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <span style={{ fontSize: '0.85rem', fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--text-primary)' }}>
@@ -319,15 +423,58 @@ const ProvisionTrainerModal = ({ isOpen, onClose, onCreated, terms }) => {
               </div>
             )}
 
+            {/* Target Institution Selection (SuperAdmin Exclusive) */}
+            {isSuperAdmin && (
+              <div>
+                <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.35rem' }}>
+                  Target Institution <span style={{ color: '#f87171' }}>*</span>
+                </label>
+                {isLoadingInstitutions ? (
+                  <div style={{ padding: '0.55rem 0.75rem', backgroundColor: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)', fontSize: '0.84rem', color: 'var(--text-muted)' }}>
+                    Loading authorized institutions...
+                  </div>
+                ) : institutionsError ? (
+                  <div style={{ padding: '0.55rem 0.75rem', backgroundColor: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: 'var(--radius-md)', fontSize: '0.82rem', color: '#f87171', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                    <AlertTriangle size={14} /><span>{institutionsError}</span>
+                  </div>
+                ) : institutions.length === 0 ? (
+                  <div style={{ padding: '0.55rem 0.75rem', backgroundColor: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)', fontSize: '0.84rem', color: 'var(--text-muted)' }}>
+                    No active institutions available.
+                  </div>
+                ) : (
+                  <select
+                    value={targetTenantId}
+                    onChange={(e) => {
+                      setTargetTenantId(e.target.value);
+                      if (error) setError('');
+                    }}
+                    required
+                    style={{ width: '100%', fontSize: '0.86rem' }}
+                  >
+                    <option value="">-- Choose School or College --</option>
+                    {institutions.map((inst) => {
+                      const instId = inst._id || inst.id;
+                      const typeLabel = inst.institutionType === 'school' ? 'School Mode' : 'College Mode';
+                      return (
+                        <option key={instId} value={instId}>
+                          {inst.name} ({typeLabel}{inst.code ? ` - ${inst.code}` : ''})
+                        </option>
+                      );
+                    })}
+                  </select>
+                )}
+              </div>
+            )}
+
             <div>
               <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.35rem' }}>
-                Full Name & Title
+                Full Name & Title <span style={{ color: '#f87171' }}>*</span>
               </label>
               <input
                 type="text"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="e.g. Dr. Arthur Pendelton"
+                placeholder={isSchool ? 'e.g. Ms. Sarah Jenkins' : 'e.g. Dr. Arthur Pendelton'}
                 required
                 style={{ width: '100%', fontSize: '0.86rem' }}
               />
@@ -335,13 +482,13 @@ const ProvisionTrainerModal = ({ isOpen, onClose, onCreated, terms }) => {
 
             <div>
               <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.35rem' }}>
-                Institutional Email
+                Institutional Email <span style={{ color: '#f87171' }}>*</span>
               </label>
               <input
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="e.g. arthur.p@nexus.edu"
+                placeholder={isSchool ? 'e.g. s.jenkins@apexschool.edu' : 'e.g. arthur.p@nexus.edu'}
                 required
                 style={{ width: '100%', fontSize: '0.86rem', fontFamily: 'var(--font-mono)' }}
               />
@@ -356,10 +503,25 @@ const ProvisionTrainerModal = ({ isOpen, onClose, onCreated, terms }) => {
                 onChange={(e) => setDepartment(e.target.value)}
                 style={{ width: '100%', fontSize: '0.86rem' }}
               >
-                <option value="School of Computing">School of Computing</option>
-                <option value="Artificial Intelligence">Artificial Intelligence</option>
-                <option value="Information Assurance">Information Assurance</option>
-                <option value="Computational Data">Computational Data</option>
+                {isSchool ? (
+                  <>
+                    <option value="Academics">Academics (General)</option>
+                    <option value="Science">Science (Physics / Chemistry / Biology)</option>
+                    <option value="Mathematics">Mathematics</option>
+                    <option value="Computer Science">Computer Science & IT</option>
+                    <option value="Commerce">Commerce & Accountancy</option>
+                    <option value="Humanities">Humanities & Social Sciences</option>
+                    <option value="Languages">Languages & Literature</option>
+                  </>
+                ) : (
+                  <>
+                    <option value="School of Computing">School of Computing</option>
+                    <option value="Artificial Intelligence">Artificial Intelligence</option>
+                    <option value="Information Assurance">Information Assurance</option>
+                    <option value="Computational Data">Computational Data</option>
+                    <option value="Software Engineering">Software Engineering</option>
+                  </>
+                )}
               </select>
             </div>
 
@@ -371,15 +533,25 @@ const ProvisionTrainerModal = ({ isOpen, onClose, onCreated, terms }) => {
                 type="text"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="Enter initial temporary password"
+                placeholder="Leave blank to auto-generate secure password"
                 style={{ width: '100%', fontSize: '0.86rem', fontFamily: 'var(--font-mono)' }}
               />
             </div>
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '0.75rem' }}>
               <button type="button" onClick={onClose} className="btn-secondary" disabled={isSubmitting}>Cancel</button>
-              <button type="submit" className="btn-primary" disabled={isSubmitting} style={{ backgroundColor: '#6366F1', borderColor: '#6366F1' }}>
-                {isSubmitting ? 'Provisioning...' : `Provision ${terms?.educatorLabel || 'Trainer'}`}
+              <button
+                type="submit"
+                className="btn-primary"
+                disabled={isFormDisabled}
+                style={{
+                  backgroundColor: '#6366F1',
+                  borderColor: '#6366F1',
+                  opacity: isFormDisabled ? 0.6 : 1,
+                  cursor: isFormDisabled ? 'not-allowed' : 'pointer'
+                }}
+              >
+                {isSubmitting ? 'Provisioning...' : `Provision ${effectiveTerms?.educatorLabel || 'Trainer'}`}
               </button>
             </div>
           </form>
@@ -1550,10 +1722,14 @@ export const AdminApp = () => {
       <ProvisionTrainerModal
         isOpen={provisionTrainerOpen}
         onClose={() => setProvisionTrainerOpen(false)}
-        onCreated={() => {
-          addToast('Trainer Provisioned', 'Faculty account authorized with temporary credentials.', 'emerald');
+        onCreated={(trainer) => {
+          const roleLabel = trainer?.role === 'teacher' ? 'Teacher' : (terms?.educatorLabel || 'Trainer');
+          addToast(`${roleLabel} Provisioned`, 'Faculty account authorized with temporary credentials.', 'emerald');
+          setAdminRefreshKey((k) => k + 1);
         }}
         terms={terms}
+        user={user}
+        selectedInstitution={selectedInstitution}
       />
 
       <MfaEnrollmentModal
