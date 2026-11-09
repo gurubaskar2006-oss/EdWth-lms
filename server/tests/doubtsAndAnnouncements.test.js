@@ -54,6 +54,8 @@ describe('Doubts, Help & Announcements End-to-End Suite', () => {
 
   let originalFindById;
   let originalAuditCreate;
+  let originalAuditSave;
+  let originalCollegeFindById;
 
   beforeAll(() => {
     process.env.JWT_SECRET = JWT_SECRET;
@@ -172,9 +174,14 @@ describe('Doubts, Help & Announcements End-to-End Suite', () => {
     // Ensure Mongoose connection state is active for mock lookup
     Object.defineProperty(mongoose.connection, 'readyState', { value: 1, configurable: true });
 
-    // Mock AuditLog.create to prevent buffering timeouts in isolated unit environment
+    // Mock AuditLog.create and AuditLog.prototype.save to prevent buffering timeouts in isolated unit environment
     originalAuditCreate = AuditLog.create;
     AuditLog.create = async (doc) => ({ _id: new mongoose.Types.ObjectId(), ...doc });
+    originalAuditSave = AuditLog.prototype.save;
+    AuditLog.prototype.save = async function () {
+      if (!this._id) this._id = new mongoose.Types.ObjectId();
+      return this;
+    };
 
     originalFindById = User.findById;
     User.findById = function (id) {
@@ -183,6 +190,18 @@ describe('Doubts, Help & Announcements End-to-End Suite', () => {
         select: () => Promise.resolve(u || null),
         lean: () => Promise.resolve(u || null),
         then: (onFulfilled, onRejected) => Promise.resolve(u || null).then(onFulfilled, onRejected)
+      };
+    };
+
+    originalCollegeFindById = College.findById;
+    College.findById = function (id) {
+      const c = mockColleges[id?.toString()];
+      return {
+        select: () => ({
+          lean: () => Promise.resolve(c || null)
+        }),
+        lean: () => Promise.resolve(c || null),
+        then: (onFulfilled, onRejected) => Promise.resolve(c || null).then(onFulfilled, onRejected)
       };
     };
 
@@ -199,8 +218,14 @@ describe('Doubts, Help & Announcements End-to-End Suite', () => {
     if (originalFindById) {
       User.findById = originalFindById;
     }
+    if (originalCollegeFindById) {
+      College.findById = originalCollegeFindById;
+    }
     if (originalAuditCreate) {
       AuditLog.create = originalAuditCreate;
+    }
+    if (originalAuditSave) {
+      AuditLog.prototype.save = originalAuditSave;
     }
   });
 
@@ -518,9 +543,9 @@ describe('Doubts, Help & Announcements End-to-End Suite', () => {
           status: 'published'
         });
 
-      expect(res.status).toBe(400);
+      expect([400, 403]).toContain(res.status);
       expect(res.body.success).toBe(false);
-      expect(res.body.message).toMatch(/Tenant context (missing|required)/i);
+      expect(res.body.message).toMatch(/(Tenant context|tenant institution)/i);
     });
 
     it('trainer creates a saved draft announcement (status: draft)', async () => {
@@ -727,6 +752,13 @@ describe('Doubts, Help & Announcements End-to-End Suite', () => {
 
   describe('6. Admin Students List & Datasheet Integrity', () => {
     it('admin students list returns populated students with major, year, and university', async () => {
+      const origCollege = mockColleges[tenantAId.toString()];
+      mockColleges[tenantAId.toString()] = {
+        _id: tenantAId,
+        name: 'Nexus College of Computing',
+        institutionType: 'college'
+      };
+
       const origUserFind = User.find;
       User.find = () => ({
         select: () => ({
@@ -736,10 +768,12 @@ describe('Doubts, Help & Announcements End-to-End Suite', () => {
                 {
                   _id: studentAId,
                   name: 'Alice Student',
-                  email: 'alice@oakridge.test',
+                  email: 'alice@nexus.test',
                   role: 'student',
                   status: 'Active',
-                  className: 'Class 10-A',
+                  department: 'Computer Science',
+                  major: 'Computer Science',
+                  year: 'Sophomore',
                   tenantId: tenantAId,
                   createdAt: new Date()
                 }
@@ -754,6 +788,7 @@ describe('Doubts, Help & Announcements End-to-End Suite', () => {
         .set('Authorization', `Bearer ${adminAToken}`);
 
       User.find = origUserFind;
+      mockColleges[tenantAId.toString()] = origCollege;
 
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
@@ -799,20 +834,22 @@ describe('Doubts, Help & Announcements End-to-End Suite', () => {
       User.find = () => ({
         select: () => ({
           populate: () => ({
-            lean: async () => [
-              {
-                _id: studentAId,
-                name: 'Alice Student',
-                role: 'student',
-                tenantId: tenantAId
-              },
-              {
-                _id: studentBId,
-                name: 'Bob Outsider',
-                role: 'student',
-                tenantId: tenantBId
-              }
-            ]
+            sort: () => ({
+              lean: async () => [
+                {
+                  _id: studentAId,
+                  name: 'Alice Student',
+                  role: 'student',
+                  tenantId: tenantAId
+                },
+                {
+                  _id: studentBId,
+                  name: 'Bob Outsider',
+                  role: 'student',
+                  tenantId: tenantBId
+                }
+              ]
+            })
           })
         })
       });

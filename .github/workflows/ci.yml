@@ -33,6 +33,7 @@ jobs:
         env:
           NODE_ENV: test
           JWT_SECRET: ci-test-secret-value-32-chars-long
+          NODE_OPTIONS: --experimental-vm-modules
 
       - name: Build Frontend Assets
         run: npm run build
