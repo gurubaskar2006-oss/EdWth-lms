@@ -23,6 +23,16 @@ const courseSchema = new mongoose.Schema({
     role: String,
     avatar: String,
   },
+  teacherId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  },
+  assignedTrainer: {
+    _id: mongoose.Schema.Types.ObjectId,
+    name: String,
+    email: String,
+    role: String
+  },
   category: String,
   level: String,
   thumbnail: String,

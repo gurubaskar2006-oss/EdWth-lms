@@ -266,7 +266,8 @@ export const SubjectsCatalogView = () => {
   const [modalOpen, setModalOpen] = useState(false);
   const [institutions, setInstitutions] = useState([]);
   const [selectedTenantId, setSelectedTenantId] = useState('');
-  const [newCourse, setNewCourse] = useState({ title: '', code: '', department: 'School of Computing', credits: '3' });
+  const [trainers, setTrainers] = useState([]);
+  const [newCourse, setNewCourse] = useState({ title: '', code: '', department: 'School of Computing', credits: '3', trainerId: '' });
   const [submitting, setSubmitting] = useState(false);
   const [deletingCourseId, setDeletingCourseId] = useState(null);
 
@@ -282,6 +283,14 @@ export const SubjectsCatalogView = () => {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    apiService.getAdminTrainers?.()
+      .then(res => {
+        if (res?.trainers) setTrainers(res.trainers);
+      })
+      .catch(() => {});
+  }, [selectedInstitution]);
 
   useEffect(() => {
     if (modalOpen && user?.role === 'superadmin') {
@@ -352,13 +361,14 @@ export const SubjectsCatalogView = () => {
         code: newCourse.code.trim().toUpperCase(),
         department: newCourse.department,
         credits: parseInt(newCourse.credits) || 3,
+        trainerId: newCourse.trainerId || undefined,
         tenantId: effectiveTenantId,
         targetTenantId: effectiveTenantId
       });
       if (res?.success) {
         addToast('Course Created', `${newCourse.title} registered in curriculum catalog.`, 'emerald');
         setModalOpen(false);
-        setNewCourse({ title: '', code: '', department: 'School of Computing', credits: '3' });
+        setNewCourse({ title: '', code: '', department: 'School of Computing', credits: '3', trainerId: '' });
         fetchCourses();
       } else {
         addToast('Creation Failed', res?.message || 'Could not register course.', 'amber');
@@ -432,9 +442,45 @@ export const SubjectsCatalogView = () => {
               <h3 style={{ fontSize: '1.1rem', fontWeight: 800, color: 'var(--text-primary)', margin: '0 0 0.4rem' }}>
                 {c.title}
               </h3>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
                 <div>Department: <strong>{c.department || c.dept || 'General'}</strong></div>
-                <div>Assigned Faculty: <strong>{c.assignedTrainer?.name || c.faculty || 'Unassigned'}</strong></div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', flexWrap: 'wrap' }}>
+                  <span>Assigned Faculty:</span>
+                  <select
+                    value={c.assignedTrainer?._id || c.teacherId || ''}
+                    onChange={async (e) => {
+                      const val = e.target.value;
+                      try {
+                        const upRes = await apiService.updateAdminCourse(c._id, { trainerId: val || null });
+                        if (upRes?.success) {
+                          addToast('Trainer Assigned', `Updated educator for ${c.title}`, 'emerald');
+                          fetchCourses();
+                        } else {
+                          addToast('Assignment Failed', upRes?.message || 'Could not update trainer', 'amber');
+                        }
+                      } catch (err) {
+                        addToast('Error', err.message, 'rose');
+                      }
+                    }}
+                    style={{
+                      padding: '0.22rem 0.5rem',
+                      fontSize: '0.78rem',
+                      borderRadius: '6px',
+                      border: '1px solid var(--border-default)',
+                      backgroundColor: 'var(--bg-input)',
+                      color: 'var(--text-primary)',
+                      fontWeight: 600,
+                      maxWidth: '180px'
+                    }}
+                  >
+                    <option value="">-- Unassigned --</option>
+                    {trainers.map((tr) => (
+                      <option key={tr._id || tr.id} value={tr._id || tr.id}>
+                        {tr.name} ({tr.email?.split('@')[0]})
+                      </option>
+                    ))}
+                  </select>
+                </div>
                 <div>Workload: <strong>{c.credits ? `${c.credits} Credits` : 'Standard'}</strong></div>
               </div>
             </div>
@@ -507,6 +553,23 @@ export const SubjectsCatalogView = () => {
                     style={{ width: '100%', fontSize: '0.86rem' }}
                   />
                 </div>
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.35rem' }}>
+                  Assigned Trainer / Educator (Optional)
+                </label>
+                <select
+                  value={newCourse.trainerId || ''}
+                  onChange={(e) => setNewCourse({ ...newCourse, trainerId: e.target.value })}
+                  style={{ width: '100%', fontSize: '0.86rem' }}
+                >
+                  <option value="">-- Unassigned / Assign Later --</option>
+                  {trainers.map((tr) => (
+                    <option key={tr._id || tr.id} value={tr._id || tr.id}>
+                      {tr.name} ({tr.email})
+                    </option>
+                  ))}
+                </select>
               </div>
               <div>
                 <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.35rem' }}>Department</label>

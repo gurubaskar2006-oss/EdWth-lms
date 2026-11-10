@@ -9,6 +9,9 @@
  */
 
 import { spawn } from 'child_process';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 
 // ─── Configurable execution limits (env-var driven, server enforces maximums) ─────────
 // The client/browser NEVER controls these values.
@@ -267,32 +270,13 @@ export const executeIsolatedCode = async ({ language, files, stdin = '', runTime
     workerStatusCache.set(workerUrl, { isOnline: false, lastChecked: Date.now() });
 
     // =========================================================================
-    // ISOLATED CONTAINER SANDBOX FALLBACK (Judge0 CE / Wandbox)
+    // ISOLATED CONTAINER SANDBOX FALLBACK (Wandbox / Judge0 CE)
     // =========================================================================
     const sampleCode = formattedFiles[0]?.content || '';
     const lang = (runtime.language || '').toLowerCase();
-
-    // 1. Try Judge0 container sandbox (C++, C, Java, Python, JS, Bash, SQLite)
-    const judge0Result = await executeJudge0({
-      language: runtime.language,
-      code: sampleCode,
-      stdin,
-      timeoutMs: boundedTimeout
-    });
-
-    if (judge0Result) {
-      return {
-        success: true,
-        data: {
-          language: runtime.language,
-          version: `${runtime.version} (Judge0 Isolated Sandbox)`,
-          run: judge0Result
-        }
-      };
-    }
-
-    // 2. Secondary C++ compiler fallback (Wandbox isolated GCC runner)
     const isCpp = lang === 'c++' || lang === 'cpp' || lang === 'c';
+
+    // 1. For C/C++, try Wandbox isolated GCC runner first (fastest, sub-second execution with STDIN support)
     if (isCpp) {
       const wandboxResult = await executeWandboxCpp({
         code: sampleCode,
@@ -312,6 +296,30 @@ export const executeIsolatedCode = async ({ language, files, stdin = '', runTime
       }
     }
 
+    // 2. Try Judge0 container sandbox (C++, C, Java, Python, JS, Bash, SQLite)
+    const judge0Result = await executeJudge0({
+      language: runtime.language,
+      code: sampleCode,
+      stdin,
+      timeoutMs: boundedTimeout
+    });
+
+    if (judge0Result) {
+      return {
+        success: true,
+        data: {
+          language: runtime.language,
+          version: `${runtime.version} (Judge0 Isolated Sandbox)`,
+          run: judge0Result
+        }
+      };
+    }
+
+    // 3. Fallback for C/C++ to Wandbox if Judge0 was tried first and failed
+    if (!isCpp) {
+      // Nothing extra needed
+    }
+
     // =========================================================================
     // PRODUCTION SECURITY ENFORCEMENT (FAIL-CLOSED FOR UNCONTAINERIZED RUNTIMES)
     // =========================================================================
@@ -327,7 +335,7 @@ export const executeIsolatedCode = async ({ language, files, stdin = '', runTime
     }
 
     // =========================================================================
-    // LOCAL EXECUTION FALLBACK (Python, Node/JS, SQL)
+    // LOCAL EXECUTION FALLBACK (Python, Node/JS, SQL) with Full STDIN Support
     // =========================================================================
     const runProcess = (command, commandArgs, input) => new Promise((resolve) => {
       try {
@@ -356,7 +364,9 @@ export const executeIsolatedCode = async ({ language, files, stdin = '', runTime
           });
         });
 
-        proc.stdin.write(input);
+        if (typeof input === 'string' && input.length > 0) {
+          proc.stdin.write(input);
+        }
         proc.stdin.end();
       } catch (err) {
         resolve(null);
@@ -368,12 +378,32 @@ export const executeIsolatedCode = async ({ language, files, stdin = '', runTime
 
     let localRun = null;
     if (lang === 'python' || lang === 'python3' || lang === 'py') {
-      for (const cmd of pythonCmds) {
-        localRun = await runProcess(cmd, ['-'], sampleCode);
-        if (localRun) break;
+      const tmpScript = path.join(os.tmpdir(), `lms_${Date.now()}_${Math.random().toString(36).slice(2)}.py`);
+      try {
+        await fs.promises.writeFile(tmpScript, sampleCode, 'utf8');
+        for (const cmd of pythonCmds) {
+          localRun = await runProcess(cmd, [tmpScript], stdin || '');
+          if (localRun) break;
+        }
+      } catch (fErr) {
+        // Fallback to piping code if temp file fails
+        for (const cmd of pythonCmds) {
+          localRun = await runProcess(cmd, ['-c', sampleCode], stdin || '');
+          if (localRun) break;
+        }
+      } finally {
+        fs.promises.unlink(tmpScript).catch(() => {});
       }
     } else if (lang === 'javascript' || lang === 'js' || lang === 'node') {
-      localRun = await runProcess('node', ['-'], sampleCode);
+      const tmpScript = path.join(os.tmpdir(), `lms_${Date.now()}_${Math.random().toString(36).slice(2)}.js`);
+      try {
+        await fs.promises.writeFile(tmpScript, sampleCode, 'utf8');
+        localRun = await runProcess('node', [tmpScript], stdin || '');
+      } catch (fErr) {
+        localRun = await runProcess('node', ['-e', sampleCode], stdin || '');
+      } finally {
+        fs.promises.unlink(tmpScript).catch(() => {});
+      }
     } else if (lang === 'sqlite' || lang === 'sqlite3' || lang === 'sql') {
       const sqlPythonScript = `import sqlite3, sys, json
 con = sqlite3.connect(':memory:')

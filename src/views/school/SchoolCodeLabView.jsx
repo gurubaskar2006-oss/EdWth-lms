@@ -476,9 +476,60 @@ export const SchoolCodeLabView = () => {
     }
   };
 
+  // Interactively prompt user for program input if code requires input() or cin and stdin is empty
+  const requestUserInputIfNeeded = useCallback((lang, codeText, existingStdin) => {
+    if (existingStdin && existingStdin.trim()) {
+      return existingStdin;
+    }
+    const l = (lang || '').toLowerCase();
+    const isPy = l.includes('py');
+    const isCpp = l.includes('c++') || l.includes('cpp') || l === 'c';
+
+    if (isPy && /\binput\s*\(/.test(codeText)) {
+      const regex = /input\s*\(\s*(['"`])(.*?)\1\s*\)/g;
+      const prompts = [];
+      let match;
+      while ((match = regex.exec(codeText)) !== null) {
+        prompts.push(match[2]);
+      }
+      if (prompts.length > 0) {
+        const answers = [];
+        for (let i = 0; i < prompts.length; i++) {
+          const ans = window.prompt(`Program Input (${i + 1} of ${prompts.length}):\n${prompts[i]}`);
+          if (ans === null) return null; // Cancelled
+          answers.push(ans);
+        }
+        return answers.join('\n') + '\n';
+      } else {
+        const ans = window.prompt('Your Python program requires user input via input().\nEnter your input value(s), separated by newlines:');
+        return ans !== null ? (ans.trim() + '\n') : null;
+      }
+    }
+
+    if (isCpp && /\b(cin\s*>>|scanf\s*\(|getline\s*\()/i.test(codeText)) {
+      const ans = window.prompt('Your C++ program reads standard input (cin / scanf).\nEnter input value(s) separated by spaces or newlines:');
+      return ans !== null ? (ans.trim() + '\n') : null;
+    }
+
+    return existingStdin || '';
+  }, []);
+
   // Execute Code safely via backend sandbox
   const handleRunCode = useCallback(async () => {
     if (isRunning) return;
+
+    let currentStdin = stdinInput;
+    if (!currentStdin || !currentStdin.trim()) {
+      const prompted = requestUserInputIfNeeded(language, code, currentStdin);
+      if (prompted === null) {
+        return; // Cancelled by student
+      }
+      if (prompted) {
+        currentStdin = prompted;
+        setStdinInput(prompted);
+      }
+    }
+
     setIsRunning(true);
     setExecutionState('RUNNING');
     setOutputTab('output');
@@ -488,7 +539,7 @@ export const SchoolCodeLabView = () => {
     const startTime = performance.now();
 
     try {
-      const response = await apiService.executeCode(language, code, stdinInput);
+      const response = await apiService.executeCode(language, code, currentStdin);
       const durationMs = Math.round(performance.now() - startTime);
 
       if (!response.success) {
@@ -1249,6 +1300,27 @@ export const SchoolCodeLabView = () => {
             {/* Errors Tab View */}
             {outputTab === 'errors' && (
               <div>
+                {stderr && (stderr.includes('EOFError') || stderr.includes('EOF when reading') || stderr.includes('requires isolated container')) && (
+                  <div style={{ padding: '0.85rem 1rem', borderRadius: '8px', backgroundColor: 'rgba(217, 119, 6, 0.15)', border: '1px solid rgba(217, 119, 6, 0.4)', marginBottom: '0.75rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap' }}>
+                    <div style={{ fontSize: '0.82rem', color: '#FCD34D' }}>
+                      💡 <strong>Standard Input Required:</strong> Your program requested input (via <code>input()</code> or <code>cin</code>), but no inputs were provided.
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setOutputTab('stdin');
+                        const prompted = requestUserInputIfNeeded(language, code, '');
+                        if (prompted) {
+                          setStdinInput(prompted);
+                        }
+                      }}
+                      className="btn-primary"
+                      style={{ fontSize: '0.76rem', padding: '0.35rem 0.85rem', backgroundColor: '#D97706', borderColor: '#D97706' }}
+                    >
+                      Enter Inputs in STDIN & Re-Run
+                    </button>
+                  </div>
+                )}
                 {stderr ? (
                   <pre style={{ margin: 0, color: '#F87171', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
                     {stderr}

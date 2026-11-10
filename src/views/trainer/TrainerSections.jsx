@@ -333,7 +333,7 @@ export const CoursesView = ({ onNavigateTab }) => {
                       {sub.code || 'CS-101'}
                     </span>
                     <h3 style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--text-primary)', margin: 0 }}>
-                      {sub.title}
+                      {sub.title || sub.name || 'Curriculum Subject'}
                     </h3>
                   </div>
                   <span style={{ fontSize: '0.8rem', fontWeight: 700, color: '#059669' }}>
@@ -341,7 +341,7 @@ export const CoursesView = ({ onNavigateTab }) => {
                   </span>
                 </div>
 
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem', margin: '0 0 0.75rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem', margin: '0 0 0.5rem' }}>
                   <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', margin: 0 }}>
                     Current Teaching: <strong style={{ color: 'var(--text-primary)' }}>{currentUnit} — {currentTopic}</strong> · {sub.enrolledCount || sub.students || 5} Students
                   </p>
@@ -352,6 +352,10 @@ export const CoursesView = ({ onNavigateTab }) => {
                   >
                     Change Teaching Topic
                   </button>
+                </div>
+
+                <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '0.65rem' }}>
+                  Faculty In-Charge: <strong style={{ color: 'var(--text-primary)' }}>{sub.assignedTrainer?.name || sub.instructor?.name || 'Assigned Educator'}</strong>
                 </div>
 
                 <div className="progress-bar-bg" style={{ height: '8px', marginBottom: '1rem' }}>

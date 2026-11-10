@@ -2169,14 +2169,15 @@ router.get('/schools', async (req, res) => {
       let otherClassCount = 0;
 
       students.forEach(st => {
-        const std = (st.standard || st.schoolProfile?.standard || st.className || '').toLowerCase();
+        const std = (st.standard || st.schoolProfile?.standard || '').toLowerCase();
+        const cls = (st.className || '').toLowerCase();
         const bName = (st.batchId ? batchMap.get(st.batchId.toString()) : '')?.toLowerCase() || '';
 
-        if (std.includes('11') || bName.includes('11')) {
-          class11Count++;
-        } else if (std.includes('12') || bName.includes('12')) {
+        if (std.includes('12') || cls.includes('12') || (!std && !cls && bName.includes('12'))) {
           class12Count++;
-        } else if (std || bName) {
+        } else if (std.includes('11') || cls.includes('11') || (!std && !cls && bName.includes('11'))) {
+          class11Count++;
+        } else if (std || cls || bName) {
           otherClassCount++;
         }
       });
