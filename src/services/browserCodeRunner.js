@@ -75,12 +75,25 @@ export const executeInBrowserSandbox = async (language, code, stdin = '') => {
         }
       });
 
-      // Provide stdin if supplied
-      if (stdin) {
-        pyodide.setStdin({
-          stdin: () => stdin
-        });
-      }
+      // Provide stdin sequential feeder with browser prompt fallback
+      const rawStdin = typeof stdin === 'string' ? stdin : '';
+      const stdinLines = rawStdin.length > 0 ? rawStdin.split(/\r?\n/) : [];
+      let stdinIndex = 0;
+
+      pyodide.setStdin({
+        stdin: () => {
+          if (stdinIndex < stdinLines.length) {
+            return stdinLines[stdinIndex++];
+          }
+          if (typeof window !== 'undefined' && typeof window.prompt === 'function') {
+            const promptVal = window.prompt('Standard Input (stdin) requested by program:');
+            if (promptVal !== null) {
+              return promptVal;
+            }
+          }
+          return null;
+        }
+      });
 
       await pyodide.runPythonAsync(code);
 

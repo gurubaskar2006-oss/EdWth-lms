@@ -200,6 +200,19 @@ describe('Lumina LMS — School Code Lab, Homework & Calendar Workflow Tests', (
       expect([200, 500, 502, 503]).toContain(res.status);
     });
 
+    it('should accept stdin payload parameter for interactive input execution', async () => {
+      const res = await request(app)
+        .post('/api/v1/execute')
+        .set('Cookie', [`token=${studentToken}`])
+        .send({
+          language: 'python',
+          files: [{ content: 'n = input()\nprint("Read:", n)' }],
+          stdin: 'Hello EdWth\n'
+        });
+
+      expect([200, 500, 502, 503]).toContain(res.status);
+    });
+
     it('should never create academic records, topic completions, or homework submissions during practice code runs', async () => {
       const beforeSubs = await Submission.countDocuments({ studentId: studentUser._id });
       const beforeProgress = await StudentProgress.findOne({ studentId: studentUser._id });

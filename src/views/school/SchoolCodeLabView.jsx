@@ -408,7 +408,8 @@ export const SchoolCodeLabView = () => {
   const [stderr, setStderr] = useState('');
   const [executionState, setExecutionState] = useState('READY'); // READY | RUNNING | COMPLETED | FAILED | TIMEOUT
   const [executionMetrics, setExecutionMetrics] = useState(null);
-  const [outputTab, setOutputTab] = useState('output'); // 'output' | 'errors' | 'telemetry'
+  const [outputTab, setOutputTab] = useState('output'); // 'output' | 'stdin' | 'errors' | 'telemetry'
+  const [stdinInput, setStdinInput] = useState('');
 
   // When switching guided exercises
   const handleSelectExercise = (exerciseId) => {
@@ -487,7 +488,7 @@ export const SchoolCodeLabView = () => {
     const startTime = performance.now();
 
     try {
-      const response = await apiService.executeCode(language, code);
+      const response = await apiService.executeCode(language, code, stdinInput);
       const durationMs = Math.round(performance.now() - startTime);
 
       if (!response.success) {
@@ -551,7 +552,7 @@ export const SchoolCodeLabView = () => {
     } finally {
       setIsRunning(false);
     }
-  }, [isRunning, language, code, currentLangConfig.label, addToast]);
+  }, [isRunning, language, code, stdinInput, currentLangConfig.label, addToast]);
 
   // Reset Editor to template
   const handleResetEditor = () => {
@@ -1054,6 +1055,37 @@ export const SchoolCodeLabView = () => {
                 OUTPUT
               </button>
               <button
+                onClick={() => setOutputTab('stdin')}
+                style={{
+                  padding: '0.3rem 0.75rem',
+                  borderRadius: '6px',
+                  fontSize: '0.74rem',
+                  fontWeight: outputTab === 'stdin' ? 700 : 500,
+                  backgroundColor: outputTab === 'stdin' ? '#1E293B' : 'transparent',
+                  color: outputTab === 'stdin' ? '#A78BFA' : '#94A3B8',
+                  border: 'none',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.35rem'
+                }}
+              >
+                <span>INPUT (STDIN)</span>
+                {stdinInput.trim() && (
+                  <span
+                    style={{
+                      fontSize: '0.62rem',
+                      padding: '0.05rem 0.35rem',
+                      borderRadius: '100px',
+                      backgroundColor: 'rgba(167, 139, 250, 0.25)',
+                      color: '#A78BFA'
+                    }}
+                  >
+                    ●
+                  </span>
+                )}
+              </button>
+              <button
                 onClick={() => setOutputTab('errors')}
                 style={{
                   padding: '0.3rem 0.75rem',
@@ -1161,6 +1193,56 @@ export const SchoolCodeLabView = () => {
                     <span>$ Ready. Click &apos;Run Practice Code&apos; to execute your Python script. Output will be displayed here.</span>
                   </div>
                 )}
+              </div>
+            )}
+
+            {/* STDIN Tab View */}
+            {outputTab === 'stdin' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div style={{ fontSize: '0.74rem', color: '#94A3B8' }}>
+                    Standard Input (stdin) for programs that read inputs via <code>input()</code> or <code>cin</code>.
+                  </div>
+                  {stdinInput && (
+                    <button
+                      type="button"
+                      onClick={() => setStdinInput('')}
+                      style={{
+                        padding: '0.2rem 0.5rem',
+                        fontSize: '0.68rem',
+                        borderRadius: '4px',
+                        backgroundColor: '#1E293B',
+                        color: '#94A3B8',
+                        border: '1px solid #334155',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      Clear Input
+                    </button>
+                  )}
+                </div>
+                <textarea
+                  value={stdinInput}
+                  onChange={(e) => setStdinInput(e.target.value)}
+                  placeholder={`Enter inputs for your program line-by-line.\nExample:\n10\n20\n\n(For programs reading: num1 = float(input()), num2 = float(input()))`}
+                  rows={4}
+                  style={{
+                    width: '100%',
+                    backgroundColor: '#0B1120',
+                    color: '#F8FAFC',
+                    border: '1px solid #334155',
+                    borderRadius: '6px',
+                    padding: '0.6rem 0.75rem',
+                    fontSize: '0.8rem',
+                    fontFamily: 'var(--font-mono)',
+                    resize: 'vertical',
+                    outline: 'none',
+                    lineHeight: 1.5
+                  }}
+                />
+                <div style={{ fontSize: '0.7rem', color: '#64748B' }}>
+                  💡 Tip: Each line in this box will be fed sequentially to consecutive <code>input()</code> or <code>cin &gt;&gt;</code> statements. You can also leave this empty to be prompted interactively during execution.
+                </div>
               </div>
             )}
 

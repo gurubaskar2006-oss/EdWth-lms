@@ -1052,6 +1052,7 @@ export const verify2FA = async (req, res) => {
       token: finalJwt,
       isTwoFactorEnabled: true,
       mustChangePassword: !!user.mustChangePassword,
+      message: 'Two-factor authentication verified successfully.',
       user: {
         _id: user._id,
         name: user.name,

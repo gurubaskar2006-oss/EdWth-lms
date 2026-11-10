@@ -59,7 +59,8 @@ export const PythonSandbox = () => {
   const [copied, setCopied] = useState(false);
 
   // Execution & Output State
-  const [outputTab, setOutputTab] = useState('output'); // 'output' | 'errors' | 'details'
+  const [outputTab, setOutputTab] = useState('output'); // 'output' | 'stdin' | 'errors' | 'details'
+  const [stdinInput, setStdinInput] = useState('');
   const [stdout, setStdout] = useState('');
   const [stderr, setStderr] = useState('');
   const [rawOutput, setRawOutput] = useState('');
@@ -118,7 +119,7 @@ export const PythonSandbox = () => {
 
     try {
       const { apiService } = await import('../services/apiService');
-      const response = await apiService.executeCode(selectedLangId, code);
+      const response = await apiService.executeCode(selectedLangId, code, stdinInput);
       const durationMs = Math.round(performance.now() - startTime);
 
       if (!response.success) {
@@ -673,6 +674,37 @@ export const PythonSandbox = () => {
               </button>
 
               <button
+                onClick={() => setOutputTab('stdin')}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '5px',
+                  padding: '0.28rem 0.65rem',
+                  borderRadius: 'var(--radius-sm)',
+                  fontSize: '0.72rem',
+                  fontWeight: outputTab === 'stdin' ? 700 : 500,
+                  backgroundColor: outputTab === 'stdin' ? '#1F2937' : 'transparent',
+                  color: outputTab === 'stdin' ? '#A78BFA' : '#9CA3AF',
+                  cursor: 'pointer'
+                }}
+              >
+                <span>INPUT (STDIN)</span>
+                {stdinInput.trim() && (
+                  <span
+                    style={{
+                      fontSize: '0.62rem',
+                      padding: '0.05rem 0.35rem',
+                      borderRadius: '100px',
+                      backgroundColor: 'rgba(167, 139, 250, 0.25)',
+                      color: '#A78BFA'
+                    }}
+                  >
+                    ●
+                  </span>
+                )}
+              </button>
+
+              <button
                 onClick={() => setOutputTab('errors')}
                 style={{
                   display: 'flex',
@@ -751,6 +783,56 @@ export const PythonSandbox = () => {
                     $ Ready. Click 'Run Code' or press Ctrl+Enter to compile and run your program.
                   </span>
                 )}
+              </div>
+            )}
+
+            {/* TAB: STDIN */}
+            {outputTab === 'stdin' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div style={{ fontSize: '0.72rem', color: '#9CA3AF' }}>
+                    Standard Input (stdin) for programs that call <code>input()</code> or <code>cin</code>.
+                  </div>
+                  {stdinInput && (
+                    <button
+                      type="button"
+                      onClick={() => setStdinInput('')}
+                      style={{
+                        padding: '0.15rem 0.45rem',
+                        fontSize: '0.65rem',
+                        borderRadius: '4px',
+                        backgroundColor: '#374151',
+                        color: '#9CA3AF',
+                        border: 'none',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      Clear Input
+                    </button>
+                  )}
+                </div>
+                <textarea
+                  value={stdinInput}
+                  onChange={(e) => setStdinInput(e.target.value)}
+                  placeholder={`Enter program inputs line-by-line.\nExample:\n10\n20\n\n(For: num1 = float(input()), num2 = float(input()))`}
+                  rows={4}
+                  style={{
+                    width: '100%',
+                    backgroundColor: '#111827',
+                    color: '#F9FAFB',
+                    border: '1px solid #374151',
+                    borderRadius: '6px',
+                    padding: '0.5rem 0.65rem',
+                    fontSize: '0.78rem',
+                    fontFamily: 'var(--font-mono)',
+                    resize: 'vertical',
+                    outline: 'none',
+                    lineHeight: 1.5
+                  }}
+                />
+                <div style={{ fontSize: '0.68rem', color: '#6B7280' }}>
+                  💡 Tip: Each line is fed to consecutive <code>input()</code> or <code>cin</code> calls.
+                </div>
               </div>
             )}
 
