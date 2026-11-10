@@ -89,6 +89,14 @@ export const verifyToken = async (req, res, next) => {
       }
     }
 
+    if (!headerToken && req.query && req.query.token) {
+      const qToken = String(req.query.token).trim();
+      if (qToken && qToken !== 'null' && qToken !== 'undefined') {
+        headerSupplied = true;
+        headerToken = qToken;
+      }
+    }
+
     let cookieToken = null;
     let cookieSupplied = false;
     if (req.cookies && (req.cookies.jwt || req.cookies.token)) {
@@ -413,6 +421,8 @@ export const verifyToken = async (req, res, next) => {
     req.tenantId = (rawTenantId && mongoose.Types.ObjectId.isValid(rawTenantId))
       ? rawTenantId.toString()
       : null;
+
+    req.token = token;
 
     if (req.user && !req.user.tenantId && req.tenantId) {
       req.user.tenantId = req.tenantId;

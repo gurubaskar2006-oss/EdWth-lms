@@ -889,7 +889,12 @@ export const apiService = {
       const res = await this._fetch(`${API_BASE_URL}/notes/${noteId}/files/download?key=${encodeURIComponent(s3Key)}`);
       if (res.ok) {
         const data = await res.json();
-        return data.url;
+        let downloadUrl = data.url;
+        if (downloadUrl && downloadUrl.startsWith('/')) {
+          const baseOrigin = API_BASE_URL.replace(/\/api\/v1\/?$/, '');
+          downloadUrl = `${baseOrigin}${downloadUrl}`;
+        }
+        return downloadUrl;
       }
       return null;
     } catch (e) {

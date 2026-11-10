@@ -12,6 +12,7 @@
 import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import dotenv from 'dotenv';
+import mongoose from 'mongoose';
 
 if (process.env.NODE_ENV !== 'production') {
   dotenv.config({ path: './server/.env' });
@@ -35,7 +36,7 @@ export const s3Client = new S3Client({
 });
 
 export const b2StorageService = {
-  isStorageConfigured: () => {
+  isB2Configured: () => {
     if (!endpoint || !accessKeyId || !secretAccessKey) return false;
     if (String(accessKeyId).toLowerCase().includes('placeholder') || String(secretAccessKey).toLowerCase().includes('placeholder')) {
       return false;
@@ -43,64 +44,108 @@ export const b2StorageService = {
     return true;
   },
 
+  isStorageConfigured: () => {
+    // Storage is available if Backblaze B2 is configured OR MongoDB is connected (GridFS durable fallback)
+    if (b2StorageService.isB2Configured()) return true;
+    return Boolean(mongoose.connection && mongoose.connection.readyState === 1);
+  },
+
   getBucketName: () => bucketName,
 
   /**
-   * Upload an object buffer to B2 Object Storage
+   * Upload an object buffer to B2 Object Storage or MongoDB GridFS
    */
   uploadObject: async ({ key, body, contentType, metadata = {} }) => {
-    if (!b2StorageService.isStorageConfigured()) {
-      throw new Error('Object storage credentials not configured. Please set B2_ENDPOINT, B2_APPLICATION_KEY_ID, and B2_APPLICATION_KEY.');
+    if (b2StorageService.isB2Configured()) {
+      const command = new PutObjectCommand({
+        Bucket: bucketName,
+        Key: key,
+        Body: body,
+        ContentType: contentType,
+        Metadata: metadata
+      });
+      return await s3Client.send(command);
     }
 
-    const command = new PutObjectCommand({
-      Bucket: bucketName,
-      Key: key,
-      Body: body,
-      ContentType: contentType,
-      Metadata: metadata
-    });
+    // Seamless MongoDB GridFS fallback when cloud object storage keys are unconfigured
+    if (mongoose.connection && mongoose.connection.readyState === 1 && mongoose.connection.db) {
+      const bucket = new mongoose.mongo.GridFSBucket(mongoose.connection.db, { bucketName: 'study_materials' });
+      return new Promise((resolve, reject) => {
+        const uploadStream = bucket.openUploadStream(key, {
+          contentType,
+          metadata: {
+            ...metadata,
+            s3Key: key,
+            contentType,
+            uploadedAt: new Date()
+          }
+        });
+        uploadStream.on('finish', () => resolve({ s3Key: key, gridFsId: uploadStream.id }));
+        uploadStream.on('error', reject);
+        uploadStream.end(body);
+      });
+    }
 
-    return await s3Client.send(command);
+    throw new Error('Object storage service unavailable.');
   },
 
   /**
    * Generate a secure, time-limited presigned download URL
    */
   getPresignedDownloadUrl: async ({ key, expiresInSeconds = 3600 }) => {
-    if (!b2StorageService.isStorageConfigured()) {
-      throw new Error('Object storage credentials not configured.');
+    if (b2StorageService.isB2Configured()) {
+      const command = new GetObjectCommand({
+        Bucket: bucketName,
+        Key: key
+      });
+      return await getSignedUrl(s3Client, command, { expiresIn: expiresInSeconds });
     }
 
-    const command = new GetObjectCommand({
-      Bucket: bucketName,
-      Key: key
-    });
-
-    return await getSignedUrl(s3Client, command, { expiresIn: expiresInSeconds });
+    return null; // Return null so noteRoutes / storageRoutes can stream from GridFS directly
   },
 
   /**
-   * Delete an object from B2 Object Storage
+   * Stream object directly from MongoDB GridFS
+   */
+  getDownloadStream: ({ key }) => {
+    if (mongoose.connection && mongoose.connection.readyState === 1 && mongoose.connection.db) {
+      const bucket = new mongoose.mongo.GridFSBucket(mongoose.connection.db, { bucketName: 'study_materials' });
+      return bucket.openDownloadStreamByName(key);
+    }
+    return null;
+  },
+
+  /**
+   * Delete an object from B2 Object Storage or MongoDB GridFS
    */
   deleteObject: async ({ key }) => {
-    if (!b2StorageService.isStorageConfigured()) {
-      throw new Error('Object storage credentials not configured.');
+    if (b2StorageService.isB2Configured()) {
+      const command = new DeleteObjectCommand({
+        Bucket: bucketName,
+        Key: key
+      });
+      return await s3Client.send(command);
     }
 
-    const command = new DeleteObjectCommand({
-      Bucket: bucketName,
-      Key: key
-    });
-
-    return await s3Client.send(command);
+    if (mongoose.connection && mongoose.connection.readyState === 1 && mongoose.connection.db) {
+      try {
+        const bucket = new mongoose.mongo.GridFSBucket(mongoose.connection.db, { bucketName: 'study_materials' });
+        const files = await bucket.find({ filename: key }).toArray();
+        for (const file of files) {
+          await bucket.delete(file._id).catch(() => {});
+        }
+      } catch {}
+      return { success: true };
+    }
   }
 };
 
+export const isB2Configured = (...args) => b2StorageService.isB2Configured(...args);
 export const isStorageConfigured = (...args) => b2StorageService.isStorageConfigured(...args);
 export const getBucketName = (...args) => b2StorageService.getBucketName(...args);
 export const uploadObject = (...args) => b2StorageService.uploadObject(...args);
 export const getPresignedDownloadUrl = (...args) => b2StorageService.getPresignedDownloadUrl(...args);
+export const getDownloadStream = (...args) => b2StorageService.getDownloadStream(...args);
 export const deleteObject = (...args) => b2StorageService.deleteObject(...args);
 
 export default b2StorageService;

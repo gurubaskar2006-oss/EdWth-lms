@@ -100,6 +100,18 @@ const userSchema = new mongoose.Schema({
   group: String,
   section: String,
   rollNumber: String,
+  registrationNumber: {
+    type: String,
+    default: ''
+  },
+  dreamCollege: {
+    type: String,
+    default: ''
+  },
+  dreamCourse: {
+    type: String,
+    default: ''
+  },
   medium: String,
   parentName: String,
   parentPhone: String,
@@ -111,6 +123,9 @@ const userSchema = new mongoose.Schema({
     group: String,
     section: String,
     rollNumber: String,
+    registrationNumber: String,
+    dreamCollege: String,
+    dreamCourse: String,
     medium: String,
     parentName: String,
     parentPhone: String,

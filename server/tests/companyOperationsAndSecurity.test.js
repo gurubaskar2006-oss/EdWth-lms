@@ -278,12 +278,12 @@ describe('Company Operations & Security Hardening Test Suite', () => {
       expect(res.body.message).toContain('company-managed');
     });
 
-    test('Student cannot alter company-managed field: email', async () => {
+    test('Student cannot alter company-managed field: studentId / schoolName', async () => {
       const res = await request(app)
         .put('/api/v1/auth/profile')
         .set('Authorization', `Bearer ${studentToken}`)
         .send({
-          email: 'newemail@domain.com'
+          studentId: 'STU-HACKED-9999'
         });
 
       expect(res.status).toBe(400);

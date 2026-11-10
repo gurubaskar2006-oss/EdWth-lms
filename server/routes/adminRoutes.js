@@ -1209,6 +1209,9 @@ router.post('/students', async (req, res) => {
       group,
       section,
       rollNumber,
+      registrationNumber,
+      dreamCollege,
+      dreamCourse,
       medium,
       parentName,
       parentPhone,
@@ -1320,12 +1323,18 @@ router.post('/students', async (req, res) => {
       const resolvedMedium = medium ? medium.trim() : 'English';
       const resolvedSession = academicYear || college?.settings?.academicConfig?.academicSession || '2026-2027';
 
+      const resolvedRoll = (rollNumber || registrationNumber) ? (rollNumber || registrationNumber).trim() : '';
+      const resolvedReg = (registrationNumber || rollNumber) ? (registrationNumber || rollNumber).trim() : '';
+
       studentData = {
         ...studentData,
         standard: resolvedStandard,
         group: resolvedGroup,
         section: resolvedSection,
-        rollNumber: rollNumber ? rollNumber.trim() : '',
+        rollNumber: resolvedRoll,
+        registrationNumber: resolvedReg,
+        dreamCollege: dreamCollege ? dreamCollege.trim() : '',
+        dreamCourse: dreamCourse ? dreamCourse.trim() : '',
         medium: resolvedMedium,
         parentName: parentName ? parentName.trim() : '',
         parentPhone: parentPhone ? parentPhone.trim() : '',
@@ -1337,7 +1346,10 @@ router.post('/students', async (req, res) => {
           standard: resolvedStandard,
           group: resolvedGroup,
           section: resolvedSection,
-          rollNumber: rollNumber ? rollNumber.trim() : '',
+          rollNumber: resolvedRoll,
+          registrationNumber: resolvedReg,
+          dreamCollege: dreamCollege ? dreamCollege.trim() : '',
+          dreamCourse: dreamCourse ? dreamCourse.trim() : '',
           medium: resolvedMedium,
           parentName: parentName ? parentName.trim() : '',
           parentPhone: parentPhone ? parentPhone.trim() : '',
