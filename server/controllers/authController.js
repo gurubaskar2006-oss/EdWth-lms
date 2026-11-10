@@ -366,23 +366,25 @@ export const updateProfile = async (req, res) => {
       return res.status(401).json({ success: false, message: 'Authentication required' });
     }
 
-    // 1. Strictly forbid company-managed & protected fields
-    const companyManagedFields = [
+    const currentUser = await User.findById(userId);
+    if (!currentUser) {
+      return res.status(404).json({ success: false, message: 'User profile not found.' });
+    }
+
+    const isStudent = currentUser.role === 'student';
+
+    // 1. Strictly forbid immutable / security-protected fields
+    // Student Name, School Name, and Student ID are strictly NOT changeable by students
+    const forbiddenFields = [
       '_id',
       'id',
       'tenantId',
       'tenant',
       'studentId',
+      'schoolName',
       'role',
       'name',
-      'email',
       'password',
-      'batchId',
-      'major',
-      'department',
-      'university',
-      'year',
-      'enrolledCourses',
       'grades',
       'attendance',
       'stats',
@@ -407,22 +409,102 @@ export const updateProfile = async (req, res) => {
       'updatedAt'
     ];
 
-    const attemptedCompanyFields = companyManagedFields.filter(
+    if (!isStudent) {
+      // Non-students (e.g. trainers/admins) cannot self-modify institutional curricula fields or email
+      forbiddenFields.push('email', 'batchId', 'major', 'department', 'university', 'year', 'enrolledCourses');
+    }
+
+    const attemptedForbiddenFields = forbiddenFields.filter(
       (field) => req.body[field] !== undefined
     );
 
-    if (attemptedCompanyFields.length > 0) {
+    if (attemptedForbiddenFields.length > 0) {
       return res.status(400).json({
         success: false,
         code: 'FORBIDDEN_PROFILE_FIELD',
-        message: `Modification of company-managed field(s) is prohibited: ${attemptedCompanyFields.join(', ')}. Name, email, academic status, grades, and credentials are maintained by 6th Civilians Corporation operations.`
+        message: `Modification of company-managed protected field(s) is prohibited: ${attemptedForbiddenFields.join(', ')}. Student name, school name, and student ID cannot be modified by students.`
       });
     }
 
-    // 2. Validate permitted personal contact fields
+    // 2. Validate permitted fields (students can modify/fill: STD, group, registrationNumber, dreamCollege, dreamCourse, email, phone, parentPhone, address)
     const allowedUpdates = {};
     const PHONE_REGEX = /^[\d\s+\-().]{7,25}$/;
+    const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+    // STD (Standard / Class)
+    if (req.body.standard !== undefined || (isStudent && req.body.className !== undefined)) {
+      const stdVal = String(req.body.standard !== undefined ? req.body.standard : req.body.className).trim();
+      if (stdVal.length > 100) {
+        return res.status(400).json({ success: false, message: 'Standard/Class name cannot exceed 100 characters.' });
+      }
+      allowedUpdates.standard = stdVal;
+      allowedUpdates.className = stdVal;
+      allowedUpdates['schoolProfile.standard'] = stdVal;
+    }
+
+    // Group / Department
+    if (req.body.group !== undefined || (isStudent && req.body.department !== undefined)) {
+      const grpVal = String(req.body.group !== undefined ? req.body.group : req.body.department).trim();
+      if (grpVal.length > 150) {
+        return res.status(400).json({ success: false, message: 'Group/Department cannot exceed 150 characters.' });
+      }
+      allowedUpdates.group = grpVal;
+      allowedUpdates.department = grpVal;
+      allowedUpdates['schoolProfile.group'] = grpVal;
+    }
+
+    // Registration Number (and rollNumber)
+    if (req.body.registrationNumber !== undefined || req.body.rollNumber !== undefined) {
+      const regVal = String(req.body.registrationNumber !== undefined ? req.body.registrationNumber : req.body.rollNumber).trim();
+      if (regVal.length > 100) {
+        return res.status(400).json({ success: false, message: 'Registration number cannot exceed 100 characters.' });
+      }
+      allowedUpdates.registrationNumber = regVal;
+      allowedUpdates.rollNumber = regVal;
+      allowedUpdates['schoolProfile.registrationNumber'] = regVal;
+      allowedUpdates['schoolProfile.rollNumber'] = regVal;
+    }
+
+    // Dream College
+    if (req.body.dreamCollege !== undefined) {
+      const colVal = String(req.body.dreamCollege).trim();
+      if (colVal.length > 200) {
+        return res.status(400).json({ success: false, message: 'Dream college cannot exceed 200 characters.' });
+      }
+      allowedUpdates.dreamCollege = colVal;
+      allowedUpdates['schoolProfile.dreamCollege'] = colVal;
+    }
+
+    // Dream Course
+    if (req.body.dreamCourse !== undefined) {
+      const crsVal = String(req.body.dreamCourse).trim();
+      if (crsVal.length > 200) {
+        return res.status(400).json({ success: false, message: 'Dream course cannot exceed 200 characters.' });
+      }
+      allowedUpdates.dreamCourse = crsVal;
+      allowedUpdates['schoolProfile.dreamCourse'] = crsVal;
+    }
+
+    // Mail ID (Email)
+    if (req.body.email !== undefined && isStudent) {
+      const emailVal = String(req.body.email).trim().toLowerCase();
+      if (!EMAIL_REGEX.test(emailVal)) {
+        return res.status(400).json({ success: false, message: 'Please enter a valid email address.' });
+      }
+      if (emailVal !== currentUser.email?.toLowerCase()) {
+        const existingEmail = await User.findOne({
+          email: emailVal,
+          tenantId: currentUser.tenantId,
+          _id: { $ne: currentUser._id }
+        });
+        if (existingEmail) {
+          return res.status(409).json({ success: false, message: 'An account with this email address already exists in this institution.' });
+        }
+        allowedUpdates.email = emailVal;
+      }
+    }
+
+    // Phone Number
     if (req.body.phone !== undefined) {
       if (typeof req.body.phone !== 'string') {
         return res.status(400).json({ success: false, message: 'Phone number must be a valid string.' });
@@ -434,6 +516,21 @@ export const updateProfile = async (req, res) => {
       allowedUpdates.phone = trimmedPhone;
     }
 
+    // Parent's Number
+    if (req.body.parentPhone !== undefined) {
+      if (typeof req.body.parentPhone !== 'string') {
+        return res.status(400).json({ success: false, message: 'Parent phone number must be a valid string.' });
+      }
+      const trimmedParentPhone = req.body.parentPhone.trim();
+      if (trimmedParentPhone && !PHONE_REGEX.test(trimmedParentPhone)) {
+        return res.status(400).json({ success: false, message: 'Please enter a valid parent phone number (7-25 digits, +, -, () permitted).' });
+      }
+      allowedUpdates.parentPhone = trimmedParentPhone;
+      allowedUpdates['schoolProfile.parentPhone'] = trimmedParentPhone;
+      allowedUpdates['emergencyContact.phone'] = trimmedParentPhone;
+    }
+
+    // Address
     if (req.body.address !== undefined) {
       if (typeof req.body.address !== 'string') {
         return res.status(400).json({ success: false, message: 'Address must be a string.' });
@@ -445,6 +542,7 @@ export const updateProfile = async (req, res) => {
       allowedUpdates.address = trimmedAddress;
     }
 
+    // Emergency Contact
     if (req.body.emergencyContact !== undefined) {
       if (typeof req.body.emergencyContact !== 'object' || req.body.emergencyContact === null || Array.isArray(req.body.emergencyContact)) {
         return res.status(400).json({ success: false, message: 'Emergency contact must be an object with name and phone.' });
@@ -484,6 +582,7 @@ export const updateProfile = async (req, res) => {
       }
     }
 
+    // Avatar
     if (req.body.avatar !== undefined) {
       if (typeof req.body.avatar !== 'string') {
         return res.status(400).json({ success: false, message: 'Avatar must be a string URL.' });
@@ -520,7 +619,8 @@ export const updateProfile = async (req, res) => {
 
     const userObj = updatedUser.toObject ? updatedUser.toObject() : { ...updatedUser._doc };
     userObj.institutionType = institutionType;
-    userObj.tenantName = tenantName;
+    userObj.tenantName = updatedUser.schoolName || tenantName || 'Academic Institution';
+    userObj.schoolName = updatedUser.schoolName || tenantName || '';
 
     return res.status(200).json({
       success: true,

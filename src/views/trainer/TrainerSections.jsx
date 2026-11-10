@@ -2837,7 +2837,7 @@ export const MaterialsView = () => {
       return;
     }
     if (!selectedFile) {
-      setUploadError('Please select a file to upload to Backblaze B2.');
+      setUploadError('Please select a file to upload.');
       return;
     }
 
@@ -2862,7 +2862,7 @@ export const MaterialsView = () => {
       if (res?.success) {
         addToast(
           'Material Published',
-          `"${matTitle}" uploaded to Backblaze B2 and shared with enrolled scholars.`,
+          `"${matTitle}" uploaded and shared with enrolled scholars.`,
           'emerald'
         );
         setShowUploadModal(false);
@@ -2871,11 +2871,11 @@ export const MaterialsView = () => {
         setMatBatchId('all');
         await fetchMaterials();
       } else {
-        setUploadError(res?.error || res?.message || 'Upload failed. Ensure Backblaze B2 is available.');
+        setUploadError(res?.error || res?.message || 'Upload failed. Please try again.');
       }
     } catch (err) {
       console.error('Upload exception:', err);
-      setUploadError('Network error while uploading material to object storage.');
+      setUploadError('Network error while uploading material to storage.');
     } finally {
       setIsUploading(false);
     }
@@ -2884,12 +2884,12 @@ export const MaterialsView = () => {
   const handleDownload = async (m) => {
     const attachedFile = m.files && m.files[0];
     if (!attachedFile || !attachedFile.s3Key) {
-      addToast('No File', 'This note does not have an attached B2 object.', 'amber');
+      addToast('No File', 'This note does not have an attached file.', 'amber');
       return;
     }
 
     setDownloadingId(m.id);
-    addToast('Requesting Download', 'Authorizing secure presigned download URL from B2...', 'subtle');
+    addToast('Requesting Download', 'Authorizing secure download link...', 'subtle');
 
     try {
       const url = await apiService.getNoteFileUrl(m.id, attachedFile.s3Key);
@@ -3212,7 +3212,7 @@ export const MaterialsView = () => {
                   Upload Study Material
                 </h3>
                 <div style={{ fontSize: '0.76rem', color: 'var(--text-secondary)', marginTop: '2px' }}>
-                  Secure Backblaze B2 private bucket storage (up to 25 MB)
+                  Secure academic material storage (up to 25 MB)
                 </div>
               </div>
               <button

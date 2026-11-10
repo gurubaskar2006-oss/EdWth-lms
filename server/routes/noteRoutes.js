@@ -6,7 +6,7 @@ import mongoose from 'mongoose';
 import Note from '../models/Note.js';
 import Batch from '../models/Batch.js';
 import { verifyToken } from '../middleware/authMiddleware.js';
-import { uploadObject, getPresignedDownloadUrl, deleteObject, isStorageConfigured } from '../utils/b2Storage.js';
+import { uploadObject, getPresignedDownloadUrl, deleteObject, isStorageConfigured, getDownloadStream } from '../utils/b2Storage.js';
 
 const router = express.Router();
 
@@ -414,20 +414,91 @@ const handleDownloadRequest = async (req, res) => {
       return res.status(503).json({
         success: false,
         error: 'STORAGE_NOT_CONFIGURED',
-        message: 'Backblaze B2 storage is not configured.'
+        message: 'Object storage is not configured.'
       });
     }
 
-    const signedUrl = await getPresignedDownloadUrl({ key: s3Key, expiresInSeconds: 3600 });
-    return res.json({ success: true, url: signedUrl, expiresInSeconds: 3600 });
+    let downloadUrl = await getPresignedDownloadUrl({ key: s3Key, expiresInSeconds: 3600 });
+    if (!downloadUrl) {
+      // In GridFS fallback mode, generate secure direct stream download URL
+      const token = req.token || req.headers.authorization?.replace(/^Bearer\s+/i, '') || req.cookies?.jwt || '';
+      downloadUrl = `/api/v1/notes/${noteId}/files/stream?key=${encodeURIComponent(s3Key)}${token ? `&token=${encodeURIComponent(token)}` : ''}`;
+    }
+
+    return res.json({ success: true, url: downloadUrl, expiresInSeconds: 3600 });
   } catch (error) {
     console.error('[NoteRoutes] Download URL error:', error);
     res.status(500).json({ error: 'Failed to generate download link' });
   }
 };
 
+/**
+ * GET /api/v1/notes/:noteId/files/stream?key=... OR /:noteId/files/:s3Key/stream
+ * Streams file attachment directly from MongoDB GridFS
+ */
+const handleStreamRequest = async (req, res) => {
+  try {
+    const { noteId } = req.params;
+    const s3Key = req.params.s3Key || req.query.key;
+    if (!s3Key) return res.status(400).json({ error: 'Missing S3 key' });
+
+    const note = await Note.findOne({ id: noteId, tenantId: req.tenantId });
+    if (!note) {
+      return res.status(404).json({ error: 'Study material or note not found.' });
+    }
+
+    const fileMeta = note.files.find(f => f.s3Key === s3Key);
+    if (!fileMeta) {
+      return res.status(404).json({ error: 'Requested attachment is not associated with this document.' });
+    }
+
+    const isStaff = isEducatorOrAdmin(req.user.role);
+    const isOwner = note.owner.toString() === req.user._id.toString();
+
+    if (!isStaff && !isOwner) {
+      if (note.visibility !== 'batch-shared') {
+        return res.status(403).json({ error: 'Access denied: Note is private.' });
+      }
+
+      if (note.batchId) {
+        const studentBatchId = req.user.batchId ? req.user.batchId.toString() : null;
+        if (!studentBatchId || studentBatchId !== note.batchId.toString()) {
+          return res.status(403).json({ error: 'Access denied: Material is restricted to a different class.' });
+        }
+      }
+    }
+
+    const downloadStream = getDownloadStream({ key: s3Key });
+    if (!downloadStream) {
+      return res.status(404).json({ error: 'File stream not available.' });
+    }
+
+    res.setHeader('Content-Type', fileMeta.mimeType || 'application/octet-stream');
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(fileMeta.originalName)}"`);
+    if (fileMeta.size) {
+      res.setHeader('Content-Length', fileMeta.size);
+    }
+
+    downloadStream.on('error', (err) => {
+      console.error('[NoteRoutes] Download stream error:', err);
+      if (!res.headersSent) {
+        res.status(404).json({ error: 'File stream error' });
+      }
+    });
+
+    downloadStream.pipe(res);
+  } catch (error) {
+    console.error('[NoteRoutes] Stream error:', error);
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'Failed to stream file' });
+    }
+  }
+};
+
 router.get('/:noteId/files/download', verifyToken, handleDownloadRequest);
 router.get('/:noteId/files/:s3Key/download', verifyToken, handleDownloadRequest);
+router.get('/:noteId/files/stream', verifyToken, handleStreamRequest);
+router.get('/:noteId/files/:s3Key/stream', verifyToken, handleStreamRequest);
 
 /**
  * DELETE /api/v1/notes/:noteId/files

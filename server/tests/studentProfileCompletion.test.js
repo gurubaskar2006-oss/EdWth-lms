@@ -46,6 +46,7 @@ describe('Lumina LMS — Student Profile Completion Workflow Test Suite', () => 
 
   let mockUsers = {};
   let originalFindById;
+  let originalFindOne;
   let originalFindByIdAndUpdate;
   let originalAuditLogCreate;
   let originalAuditLogSave;
@@ -119,6 +120,27 @@ describe('Lumina LMS — Student Profile Completion Workflow Test Suite', () => 
       };
     };
 
+    // Mock User.findOne for email uniqueness checks
+    originalFindOne = User.findOne;
+    User.findOne = function(query) {
+      if (query && query.email) {
+        const found = Object.values(mockUsers).find(u => 
+          u.email?.toLowerCase() === query.email?.toLowerCase() && 
+          (!query._id?.$ne || u._id.toString() !== query._id.$ne.toString())
+        );
+        return {
+          select: () => Promise.resolve(found || null),
+          lean: () => Promise.resolve(found || null),
+          then: (onFulfilled, onRejected) => Promise.resolve(found || null).then(onFulfilled, onRejected)
+        };
+      }
+      return {
+        select: () => Promise.resolve(null),
+        lean: () => Promise.resolve(null),
+        then: (onFulfilled, onRejected) => Promise.resolve(null).then(onFulfilled, onRejected)
+      };
+    };
+
     // Mock User.findByIdAndUpdate
     originalFindByIdAndUpdate = User.findByIdAndUpdate;
     User.findByIdAndUpdate = function(id, update) {
@@ -186,6 +208,9 @@ describe('Lumina LMS — Student Profile Completion Workflow Test Suite', () => 
   afterAll(() => {
     if (originalFindById) {
       User.findById = originalFindById;
+    }
+    if (originalFindOne) {
+      User.findOne = originalFindOne;
     }
     if (originalFindByIdAndUpdate) {
       User.findByIdAndUpdate = originalFindByIdAndUpdate;
@@ -338,16 +363,15 @@ describe('Lumina LMS — Student Profile Completion Workflow Test Suite', () => 
   });
 
   describe('4. Security & Tenant Isolation', () => {
-    test('Rejects attempts to modify protected company-managed fields', async () => {
+    test('Rejects attempts to modify protected company-managed fields (student name, school name, student ID, role, credentials)', async () => {
       const forbiddenFields = [
         { role: 'admin' },
-        { email: 'hacked@school.edu' },
         { name: 'Impostor' },
         { studentId: 'NEW-ID-999' },
+        { schoolName: 'Malicious Academy' },
         { password: 'newpassword123' },
         { grades: [100, 100] },
         { attendance: 100 },
-        { major: 'Computer Science' },
         { tenantId: new mongoose.Types.ObjectId().toString() }
       ];
 
@@ -360,6 +384,31 @@ describe('Lumina LMS — Student Profile Completion Workflow Test Suite', () => 
         expect(res.status).toBe(400);
         expect(res.body.code).toBe('FORBIDDEN_PROFILE_FIELD');
       }
+    });
+
+    test('Student can update self-service handwritten profile fields (STD, group, registrationNumber, dreamCollege, dreamCourse, email, parentPhone)', async () => {
+      const res = await request(app)
+        .put('/api/v1/auth/profile')
+        .set('Authorization', `Bearer ${aliceToken}`)
+        .send({
+          standard: 'Class 11',
+          group: 'Computer Science',
+          registrationNumber: 'REG-2026-001',
+          dreamCollege: 'IIT Madras',
+          dreamCourse: 'B.Tech Computer Science',
+          email: 'alice.updated@school.edu',
+          parentPhone: '+1 (555) 987-6543'
+        });
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.user.standard).toBe('Class 11');
+      expect(res.body.user.group).toBe('Computer Science');
+      expect(res.body.user.registrationNumber).toBe('REG-2026-001');
+      expect(res.body.user.dreamCollege).toBe('IIT Madras');
+      expect(res.body.user.dreamCourse).toBe('B.Tech Computer Science');
+      expect(res.body.user.email).toBe('alice.updated@school.edu');
+      expect(res.body.user.parentPhone).toBe('+1 (555) 987-6543');
     });
 
     test('Student identity is derived from verified token; cannot modify another student', async () => {

@@ -19,7 +19,14 @@ import {
   QrCode,
   Copy,
   Check,
-  AlertTriangle
+  AlertTriangle,
+  GraduationCap,
+  School,
+  BookOpen,
+  Sparkles,
+  Hash,
+  Mail,
+  Building2
 } from 'lucide-react';
 import { apiService } from '../services/apiService';
 
@@ -33,13 +40,27 @@ export const SettingsView = ({ onCancel }) => {
   const isSuperAdmin = role === 'superadmin';
   const isAdmin = role === 'admin' || isSuperAdmin;
 
-  // Personal fields initialized from current user object
+  // Personal & Academic profile fields initialized from current user object
   const [formData, setFormData] = useState({
+    // Non-changeable (managed by admin/institution)
+    name: user?.name || '',
+    schoolName: user?.schoolName || user?.tenantName || user?.institutionName || '',
+    studentId: user?.studentId || '',
+
+    // Student self-service fields (Handwritten note details)
+    standard: user?.standard || user?.schoolProfile?.standard || user?.className || '',
+    group: user?.group || user?.schoolProfile?.group || user?.department || '',
+    registrationNumber: user?.registrationNumber || user?.schoolProfile?.registrationNumber || user?.rollNumber || '',
+    dreamCollege: user?.dreamCollege || user?.schoolProfile?.dreamCollege || '',
+    dreamCourse: user?.dreamCourse || user?.schoolProfile?.dreamCourse || '',
+    email: user?.email || '',
     phone: user?.phone || '',
+    parentPhone: user?.parentPhone || user?.schoolProfile?.parentPhone || user?.emergencyContact?.phone || '',
+
     address: user?.address || '',
     emergencyContact: {
-      name: user?.emergencyContact?.name || '',
-      phone: user?.emergencyContact?.phone || '',
+      name: user?.emergencyContact?.name || user?.parentName || '',
+      phone: user?.parentPhone || user?.emergencyContact?.phone || '',
       relationship: user?.emergencyContact?.relationship || 'Parent/Guardian'
     }
   });
@@ -51,6 +72,7 @@ export const SettingsView = ({ onCancel }) => {
 
   // Phone format validation standard (7 to 25 characters, digits, +, -, ())
   const PHONE_REGEX = /^[\d\s+\-().]{7,25}$/;
+  const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
   // Notifications preferences (client-side persisted)
   const [emailNotifications, setEmailNotifications] = useState(true);
@@ -70,34 +92,66 @@ export const SettingsView = ({ onCancel }) => {
   useEffect(() => {
     if (user) {
       setFormData({
+        name: user.name || '',
+        schoolName: user.schoolName || user.tenantName || user.institutionName || '',
+        studentId: user.studentId || '',
+
+        standard: user.standard || user.schoolProfile?.standard || user.className || '',
+        group: user.group || user.schoolProfile?.group || user.department || '',
+        registrationNumber: user.registrationNumber || user.schoolProfile?.registrationNumber || user.rollNumber || '',
+        dreamCollege: user.dreamCollege || user.schoolProfile?.dreamCollege || '',
+        dreamCourse: user.dreamCourse || user.schoolProfile?.dreamCourse || '',
+        email: user.email || '',
         phone: user.phone || '',
+        parentPhone: user.parentPhone || user.schoolProfile?.parentPhone || user.emergencyContact?.phone || '',
+
         address: user.address || '',
         emergencyContact: {
-          name: user.emergencyContact?.name || '',
-          phone: user.emergencyContact?.phone || '',
+          name: user.emergencyContact?.name || user.parentName || '',
+          phone: user.parentPhone || user.emergencyContact?.phone || '',
           relationship: user.emergencyContact?.relationship || 'Parent/Guardian'
         }
       });
       setFieldErrors({});
     }
-  }, [user?._id, user?.phone, user?.address]);
+  }, [
+    user?._id,
+    user?.phone,
+    user?.email,
+    user?.standard,
+    user?.group,
+    user?.registrationNumber,
+    user?.dreamCollege,
+    user?.dreamCourse,
+    user?.parentPhone,
+    user?.address
+  ]);
 
   // Profile completion calculation from the 3 required student fields (only calculated for students)
   const hasPhone = Boolean(formData.phone && formData.phone.trim() && PHONE_REGEX.test(formData.phone.trim()));
   const hasAddress = Boolean(formData.address && formData.address.trim());
   const hasEmergencyName = Boolean(formData.emergencyContact?.name && formData.emergencyContact.name.trim());
-  const hasEmergencyPhone = Boolean(formData.emergencyContact?.phone && formData.emergencyContact.phone.trim() && PHONE_REGEX.test(formData.emergencyContact.phone.trim()));
+  const hasEmergencyPhone = Boolean((formData.parentPhone || formData.emergencyContact?.phone) && (formData.parentPhone || formData.emergencyContact?.phone).trim() && PHONE_REGEX.test((formData.parentPhone || formData.emergencyContact?.phone).trim()));
   const hasEmergency = hasEmergencyName && hasEmergencyPhone;
-
-  const requiredFields = [
-    { key: 'phone', label: 'Contact Phone Number', filled: hasPhone },
-    { key: 'address', label: 'Residential Address', filled: hasAddress },
-    { key: 'emergency', label: 'Emergency Contact (Name & Phone)', filled: hasEmergency }
-  ];
 
   const completedCount = (hasPhone ? 1 : 0) + (hasAddress ? 1 : 0) + (hasEmergency ? 1 : 0);
   const completionPercentage = Math.round((completedCount / 3) * 100);
-  const missingFields = requiredFields.filter(f => !f.filled);
+
+  const studentTrackedFields = isStudent ? [
+    { key: 'standard', label: 'STD (Standard / Class)', filled: Boolean(formData.standard && formData.standard.trim()) },
+    { key: 'group', label: 'Group / Department', filled: Boolean(formData.group && formData.group.trim()) },
+    { key: 'registrationNumber', label: 'Registration Number', filled: Boolean(formData.registrationNumber && formData.registrationNumber.trim()) },
+    { key: 'dreamCollege', label: 'Dream College', filled: Boolean(formData.dreamCollege && formData.dreamCollege.trim()) },
+    { key: 'dreamCourse', label: 'Dream Course', filled: Boolean(formData.dreamCourse && formData.dreamCourse.trim()) },
+    { key: 'email', label: 'Mail ID', filled: Boolean(formData.email && formData.email.trim()) },
+    { key: 'phone', label: 'Phone Number', filled: hasPhone },
+    { key: 'parentPhone', label: "Parent's Number", filled: Boolean(formData.parentPhone && formData.parentPhone.trim() && PHONE_REGEX.test(formData.parentPhone.trim())) }
+  ] : [
+    { key: 'phone', label: 'Contact Phone Number', filled: hasPhone },
+    { key: 'address', label: 'Residential Address', filled: hasAddress }
+  ];
+
+  const missingFields = studentTrackedFields.filter(f => !f.filled);
 
   const handleSetup2FA = async () => {
     setIsSettingUp2FA(true);
@@ -145,11 +199,23 @@ export const SettingsView = ({ onCancel }) => {
   const handleCancel = () => {
     if (user) {
       setFormData({
+        name: user.name || '',
+        schoolName: user.schoolName || user.tenantName || user.institutionName || '',
+        studentId: user.studentId || '',
+
+        standard: user.standard || user.schoolProfile?.standard || user.className || '',
+        group: user.group || user.schoolProfile?.group || user.department || '',
+        registrationNumber: user.registrationNumber || user.schoolProfile?.registrationNumber || user.rollNumber || '',
+        dreamCollege: user.dreamCollege || user.schoolProfile?.dreamCollege || '',
+        dreamCourse: user.dreamCourse || user.schoolProfile?.dreamCourse || '',
+        email: user.email || '',
         phone: user.phone || '',
+        parentPhone: user.parentPhone || user.schoolProfile?.parentPhone || user.emergencyContact?.phone || '',
+
         address: user.address || '',
         emergencyContact: {
-          name: user.emergencyContact?.name || '',
-          phone: user.emergencyContact?.phone || '',
+          name: user.emergencyContact?.name || user.parentName || '',
+          phone: user.parentPhone || user.emergencyContact?.phone || '',
           relationship: user.emergencyContact?.relationship || 'Parent/Guardian'
         }
       });
@@ -170,31 +236,22 @@ export const SettingsView = ({ onCancel }) => {
 
     const errors = {};
     const trimmedPhone = (formData.phone || '').trim();
+    const trimmedParentPhone = (formData.parentPhone || '').trim();
+    const trimmedEmail = (formData.email || '').trim();
     const trimmedAddress = (formData.address || '').trim();
-    const trimmedEmergencyName = (formData.emergencyContact?.name || '').trim();
-    const trimmedEmergencyPhone = (formData.emergencyContact?.phone || '').trim();
 
     if (isStudent) {
-      if (!trimmedPhone) {
-        errors.phone = 'Contact phone number is required.';
-      } else if (!PHONE_REGEX.test(trimmedPhone)) {
-        errors.phone = 'Please enter a valid phone number (7-25 digits, +, -, () permitted).';
+      if (trimmedPhone && !PHONE_REGEX.test(trimmedPhone)) {
+        errors.phone = 'Please enter a valid student phone number (7-25 digits, +, -, () permitted).';
       }
-
-      if (!trimmedAddress) {
-        errors.address = 'Residential mailing address is required.';
-      } else if (trimmedAddress.length > 300) {
+      if (trimmedParentPhone && !PHONE_REGEX.test(trimmedParentPhone)) {
+        errors.parentPhone = "Please enter a valid parent's phone number (7-25 digits, +, -, () permitted).";
+      }
+      if (trimmedEmail && !EMAIL_REGEX.test(trimmedEmail)) {
+        errors.email = 'Please enter a valid email address.';
+      }
+      if (trimmedAddress && trimmedAddress.length > 300) {
         errors.address = 'Address cannot exceed 300 characters.';
-      }
-
-      if (!trimmedEmergencyName) {
-        errors.emergencyName = 'Emergency contact full name is required.';
-      }
-
-      if (!trimmedEmergencyPhone) {
-        errors.emergencyPhone = 'Emergency contact phone number is required.';
-      } else if (!PHONE_REGEX.test(trimmedEmergencyPhone)) {
-        errors.emergencyPhone = 'Please enter a valid emergency contact phone number.';
       }
     } else {
       // Trainer / Staff / Admin validation (optional self-service fields)
@@ -209,7 +266,7 @@ export const SettingsView = ({ onCancel }) => {
     if (Object.keys(errors).length > 0) {
       setFieldErrors(errors);
       setSaveError('Please correct the highlighted errors before saving.');
-      addToast('Incomplete Details', 'Please complete all required profile fields.', 'amber');
+      addToast('Incomplete Details', 'Please correct the highlighted fields.', 'amber');
       return;
     }
 
@@ -218,15 +275,24 @@ export const SettingsView = ({ onCancel }) => {
 
     try {
       const payload = {};
-      if (trimmedPhone !== undefined) payload.phone = trimmedPhone;
-      if (trimmedAddress !== undefined) payload.address = trimmedAddress;
-
       if (isStudent) {
+        payload.standard = (formData.standard || '').trim();
+        payload.group = (formData.group || '').trim();
+        payload.registrationNumber = (formData.registrationNumber || '').trim();
+        payload.dreamCollege = (formData.dreamCollege || '').trim();
+        payload.dreamCourse = (formData.dreamCourse || '').trim();
+        payload.email = trimmedEmail;
+        payload.phone = trimmedPhone;
+        payload.parentPhone = trimmedParentPhone;
+        if (trimmedAddress) payload.address = trimmedAddress;
         payload.emergencyContact = {
-          name: trimmedEmergencyName,
-          phone: trimmedEmergencyPhone,
+          name: (formData.emergencyContact?.name || formData.parentName || 'Parent / Guardian').trim(),
+          phone: trimmedParentPhone,
           relationship: (formData.emergencyContact?.relationship || 'Parent/Guardian').trim()
         };
+      } else {
+        if (trimmedPhone) payload.phone = trimmedPhone;
+        if (trimmedAddress) payload.address = trimmedAddress;
       }
 
       const res = await apiService.updateProfile(payload);
@@ -239,7 +305,7 @@ export const SettingsView = ({ onCancel }) => {
           isTrainer
             ? 'Faculty profile details saved successfully.'
             : isStudent
-            ? 'Your student contact details have been verified and saved.'
+            ? 'Your student profile details have been saved successfully.'
             : 'Administrator profile details saved successfully.',
           'emerald'
         );
@@ -517,143 +583,368 @@ export const SettingsView = ({ onCancel }) => {
               </div>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '1rem' }}>
-              <div>
-                <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.35rem' }}>
-                  Official {isStudent ? 'Enrolled' : 'Account'} Name
-                </label>
-                <input
-                  type="text"
-                  value={user?.name || ''}
-                  disabled
-                  style={{ width: '100%', opacity: 0.7, cursor: 'not-allowed', backgroundColor: 'var(--bg-secondary)' }}
-                />
-              </div>
-
-              <div>
-                <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.35rem' }}>
-                  Official {isStudent ? 'Student' : 'Admin'} Email
-                </label>
-                <input
-                  type="email"
-                  value={user?.email || ''}
-                  disabled
-                  style={{ width: '100%', opacity: 0.7, cursor: 'not-allowed', backgroundColor: 'var(--bg-secondary)', fontFamily: 'var(--font-mono)' }}
-                />
-              </div>
-
-              {isStudent && (
+            {/* Non-changeable academic identity fields: Student Name, School Name, Student ID */}
+            {isStudent ? (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '1rem' }}>
                 <div>
-                  <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.35rem' }}>
-                    Assigned Class / Cohort
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.35rem' }}>
+                    <Lock size={12} color="#D97706" /> Student Name (1. Stud Name)
                   </label>
                   <input
                     type="text"
-                    value={user?.major || user?.className || 'Assigned Cohort'}
+                    value={user?.name || ''}
+                    disabled
+                    style={{ width: '100%', opacity: 0.75, cursor: 'not-allowed', backgroundColor: 'var(--bg-secondary)', fontWeight: 600 }}
+                  />
+                  <span style={{ fontSize: '0.71rem', color: 'var(--text-muted)', display: 'block', marginTop: '0.25rem' }}>
+                    Official enrolled student name (Non-changeable)
+                  </span>
+                </div>
+
+                <div>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.35rem' }}>
+                    <Lock size={12} color="#D97706" /> School Name (2. Schl Name)
+                  </label>
+                  <input
+                    type="text"
+                    value={user?.schoolName || user?.tenantName || user?.institutionName || 'Victory Matriculation Higher Secondary School'}
+                    disabled
+                    style={{ width: '100%', opacity: 0.75, cursor: 'not-allowed', backgroundColor: 'var(--bg-secondary)', fontWeight: 600 }}
+                  />
+                  <span style={{ fontSize: '0.71rem', color: 'var(--text-muted)', display: 'block', marginTop: '0.25rem' }}>
+                    Assigned school / academic institution (Non-changeable)
+                  </span>
+                </div>
+
+                <div>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.35rem' }}>
+                    <Lock size={12} color="#D97706" /> Student ID
+                  </label>
+                  <input
+                    type="text"
+                    value={user?.studentId || 'N/A'}
+                    disabled
+                    style={{ width: '100%', opacity: 0.75, cursor: 'not-allowed', backgroundColor: 'var(--bg-secondary)', fontFamily: 'var(--font-mono)', fontWeight: 600 }}
+                  />
+                  <span style={{ fontSize: '0.71rem', color: 'var(--text-muted)', display: 'block', marginTop: '0.25rem' }}>
+                    Unique institutional registry number (Non-changeable)
+                  </span>
+                </div>
+              </div>
+            ) : (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '1rem' }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.35rem' }}>
+                    Official Account Name
+                  </label>
+                  <input
+                    type="text"
+                    value={user?.name || ''}
                     disabled
                     style={{ width: '100%', opacity: 0.7, cursor: 'not-allowed', backgroundColor: 'var(--bg-secondary)' }}
                   />
                 </div>
-              )}
 
-              <div>
-                <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.35rem' }}>
-                  Institutional Tenant
-                </label>
-                <input
-                  type="text"
-                  value={user?.tenantName || 'Assigned Institution'}
-                  disabled
-                  style={{ width: '100%', opacity: 0.7, cursor: 'not-allowed', backgroundColor: 'var(--bg-secondary)' }}
-                />
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.35rem' }}>
+                    Official Admin Email
+                  </label>
+                  <input
+                    type="email"
+                    value={user?.email || ''}
+                    disabled
+                    style={{ width: '100%', opacity: 0.7, cursor: 'not-allowed', backgroundColor: 'var(--bg-secondary)', fontFamily: 'var(--font-mono)' }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.35rem' }}>
+                    Institutional Tenant
+                  </label>
+                  <input
+                    type="text"
+                    value={user?.tenantName || 'Assigned Institution'}
+                    disabled
+                    style={{ width: '100%', opacity: 0.7, cursor: 'not-allowed', backgroundColor: 'var(--bg-secondary)' }}
+                  />
+                </div>
               </div>
-            </div>
+            )}
 
             <p style={{ fontSize: '0.76rem', color: 'var(--text-muted)', margin: '1rem 0 0' }}>
-              * Academic assignments, credentials, and institutional tenancy are managed centrally by institution administration.
+              {isStudent
+                ? '* Student Name, School Name, and Student ID are locked by institution administration. All other details below can be filled or changed.'
+                : '* Academic assignments, credentials, and institutional tenancy are managed centrally by institution administration.'}
             </p>
           </div>
         )}
 
-        {/* ─── Personal Contact Details (Self-Service: Only for Students, Teachers & Local Admins) ─── */}
-        {!isSuperAdmin && (
+        {/* ─── Student Academic & Career Aspirations Card (Self-Service: Editable & Fillable) ─── */}
+        {!isSuperAdmin && isStudent && (
           <div className="card" style={{ padding: '1.75rem' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', marginBottom: '1.25rem' }}>
-              <User size={19} color="#059669" />
-              <h3 style={{ fontSize: '1.1rem', fontWeight: 800, color: 'var(--text-primary)', margin: 0 }}>
-                {isStudent ? 'Personal Contact & Emergency Information (Self-Service)' : 'Personal Contact Details (Self-Service)'}
-              </h3>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                <GraduationCap size={19} color="#2563EB" />
+                <h3 style={{ fontSize: '1.1rem', fontWeight: 800, color: 'var(--text-primary)', margin: 0 }}>
+                  Academic Profile & Career Aspirations (Self-Service)
+                </h3>
+              </div>
+              <span style={{ fontSize: '0.72rem', fontWeight: 700, padding: '0.2rem 0.55rem', borderRadius: '4px', backgroundColor: 'rgba(37, 99, 235, 0.1)', color: '#2563EB', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                <Check size={12} /> Editable by Student
+              </span>
             </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1.25rem' }}>
-            <div>
-              <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 700, color: fieldErrors.phone ? '#EF4444' : 'var(--text-secondary)', marginBottom: '0.35rem' }}>
-                Contact Phone Number {isStudent && '*'}
-              </label>
-              <div style={{ position: 'relative' }}>
-                <Phone size={15} color={fieldErrors.phone ? '#EF4444' : 'var(--text-muted)'} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)' }} />
-                <input
-                  type="tel"
-                  required={isStudent}
-                  placeholder="+1 (555) 123-4567"
-                  value={formData.phone}
-                  onChange={(e) => {
-                    setFormData({ ...formData, phone: e.target.value });
-                    if (fieldErrors.phone) setFieldErrors({ ...fieldErrors, phone: null });
-                  }}
-                  style={{
-                    width: '100%',
-                    paddingLeft: '2.4rem',
-                    fontSize: '0.88rem',
-                    borderColor: fieldErrors.phone ? '#EF4444' : undefined
-                  }}
-                />
-              </div>
-              {fieldErrors.phone ? (
-                <span style={{ fontSize: '0.74rem', color: '#EF4444', display: 'block', marginTop: '0.25rem' }}>
-                  {fieldErrors.phone}
-                </span>
-              ) : (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '1.25rem' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '0.35rem' }}>
+                  STD (Standard / Class)
+                </label>
+                <div style={{ position: 'relative' }}>
+                  <BookOpen size={15} color="var(--text-muted)" style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)' }} />
+                  <input
+                    type="text"
+                    placeholder="e.g. Class 11, 10th Standard"
+                    value={formData.standard}
+                    onChange={(e) => setFormData({ ...formData, standard: e.target.value })}
+                    style={{ width: '100%', paddingLeft: '2.4rem', fontSize: '0.88rem' }}
+                  />
+                </div>
                 <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
-                  {isStudent ? 'Used for critical academic updates and emergency alerts' : 'Optional direct contact phone'}
+                  Current standard / class level
                 </span>
-              )}
-            </div>
+              </div>
 
-            <div>
-              <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 700, color: fieldErrors.address ? '#EF4444' : 'var(--text-secondary)', marginBottom: '0.35rem' }}>
-                {isStudent ? 'Residential / Mailing Address *' : 'Campus / Office Address'}
-              </label>
-              <div style={{ position: 'relative' }}>
-                <MapPin size={15} color={fieldErrors.address ? '#EF4444' : 'var(--text-muted)'} style={{ position: 'absolute', left: '12px', top: '14px' }} />
-                <input
-                  type="text"
-                  required={isStudent}
-                  placeholder={isStudent ? 'e.g. 142 Elm Street, Suite 4B, Boston, MA' : 'e.g. Faculty Building B, Office 302'}
-                  value={formData.address}
-                  onChange={(e) => {
-                    setFormData({ ...formData, address: e.target.value });
-                    if (fieldErrors.address) setFieldErrors({ ...fieldErrors, address: null });
-                  }}
-                  style={{
-                    width: '100%',
-                    paddingLeft: '2.4rem',
-                    fontSize: '0.88rem',
-                    borderColor: fieldErrors.address ? '#EF4444' : undefined
-                  }}
-                />
-              </div>
-              {fieldErrors.address ? (
-                <span style={{ fontSize: '0.74rem', color: '#EF4444', display: 'block', marginTop: '0.25rem' }}>
-                  {fieldErrors.address}
-                </span>
-              ) : (
+              <div>
+                <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '0.35rem' }}>
+                  Group / Department
+                </label>
+                <div style={{ position: 'relative' }}>
+                  <GraduationCap size={15} color="var(--text-muted)" style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)' }} />
+                  <input
+                    type="text"
+                    placeholder="e.g. Computer Science, Bio-Maths, Commerce"
+                    value={formData.group}
+                    onChange={(e) => setFormData({ ...formData, group: e.target.value })}
+                    style={{ width: '100%', paddingLeft: '2.4rem', fontSize: '0.88rem' }}
+                  />
+                </div>
                 <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
-                  {isStudent ? 'Required for official accreditation and student verification' : 'Optional office or mailing address'}
+                  Academic stream or department
                 </span>
-              )}
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '0.35rem' }}>
+                  Registration Number
+                </label>
+                <div style={{ position: 'relative' }}>
+                  <Hash size={15} color="var(--text-muted)" style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)' }} />
+                  <input
+                    type="text"
+                    placeholder="e.g. 2026-CS-042 / REG-001"
+                    value={formData.registrationNumber}
+                    onChange={(e) => setFormData({ ...formData, registrationNumber: e.target.value })}
+                    style={{ width: '100%', paddingLeft: '2.4rem', fontSize: '0.88rem' }}
+                  />
+                </div>
+                <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                  Official registration / board roll number
+                </span>
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '0.35rem' }}>
+                  Dream College
+                </label>
+                <div style={{ position: 'relative' }}>
+                  <Building2 size={15} color="var(--text-muted)" style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)' }} />
+                  <input
+                    type="text"
+                    placeholder="e.g. IIT Madras, MIT, Anna University"
+                    value={formData.dreamCollege}
+                    onChange={(e) => setFormData({ ...formData, dreamCollege: e.target.value })}
+                    style={{ width: '100%', paddingLeft: '2.4rem', fontSize: '0.88rem' }}
+                  />
+                </div>
+                <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                  Target higher education college / university
+                </span>
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '0.35rem' }}>
+                  Dream Course
+                </label>
+                <div style={{ position: 'relative' }}>
+                  <Sparkles size={15} color="var(--text-muted)" style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)' }} />
+                  <input
+                    type="text"
+                    placeholder="e.g. B.Tech Computer Science, Artificial Intelligence"
+                    value={formData.dreamCourse}
+                    onChange={(e) => setFormData({ ...formData, dreamCourse: e.target.value })}
+                    style={{ width: '100%', paddingLeft: '2.4rem', fontSize: '0.88rem' }}
+                  />
+                </div>
+                <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                  Target academic course or degree
+                </span>
+              </div>
             </div>
           </div>
+        )}
+
+        {/* ─── Personal Contact & Parent Details Card (Self-Service) ─── */}
+        {!isSuperAdmin && (
+          <div className="card" style={{ padding: '1.75rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                <User size={19} color="#059669" />
+                <h3 style={{ fontSize: '1.1rem', fontWeight: 800, color: 'var(--text-primary)', margin: 0 }}>
+                  {isStudent ? 'Contact & Parent Information (Self-Service)' : 'Personal Contact Details (Self-Service)'}
+                </h3>
+              </div>
+              <span style={{ fontSize: '0.72rem', fontWeight: 700, padding: '0.2rem 0.55rem', borderRadius: '4px', backgroundColor: 'rgba(5, 150, 105, 0.1)', color: '#059669', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                <Check size={12} /> Editable
+              </span>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1.25rem' }}>
+              {isStudent && (
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 700, color: fieldErrors.email ? '#EF4444' : 'var(--text-secondary)', marginBottom: '0.35rem' }}>
+                    Mail ID (Email)
+                  </label>
+                  <div style={{ position: 'relative' }}>
+                    <Mail size={15} color={fieldErrors.email ? '#EF4444' : 'var(--text-muted)'} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)' }} />
+                    <input
+                      type="email"
+                      placeholder="e.g. student@school.edu"
+                      value={formData.email}
+                      onChange={(e) => {
+                        setFormData({ ...formData, email: e.target.value });
+                        if (fieldErrors.email) setFieldErrors({ ...fieldErrors, email: null });
+                      }}
+                      style={{
+                        width: '100%',
+                        paddingLeft: '2.4rem',
+                        fontSize: '0.88rem',
+                        borderColor: fieldErrors.email ? '#EF4444' : undefined
+                      }}
+                    />
+                  </div>
+                  {fieldErrors.email ? (
+                    <span style={{ fontSize: '0.74rem', color: '#EF4444', display: 'block', marginTop: '0.25rem' }}>
+                      {fieldErrors.email}
+                    </span>
+                  ) : (
+                    <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                      Official student email for notifications & communications
+                    </span>
+                  )}
+                </div>
+              )}
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 700, color: fieldErrors.phone ? '#EF4444' : 'var(--text-secondary)', marginBottom: '0.35rem' }}>
+                  {isStudent ? 'Phone Number (Student)' : 'Contact Phone Number'}
+                </label>
+                <div style={{ position: 'relative' }}>
+                  <Phone size={15} color={fieldErrors.phone ? '#EF4444' : 'var(--text-muted)'} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)' }} />
+                  <input
+                    type="tel"
+                    placeholder="+91 98765 43210"
+                    value={formData.phone}
+                    onChange={(e) => {
+                      setFormData({ ...formData, phone: e.target.value });
+                      if (fieldErrors.phone) setFieldErrors({ ...fieldErrors, phone: null });
+                    }}
+                    style={{
+                      width: '100%',
+                      paddingLeft: '2.4rem',
+                      fontSize: '0.88rem',
+                      borderColor: fieldErrors.phone ? '#EF4444' : undefined
+                    }}
+                  />
+                </div>
+                {fieldErrors.phone ? (
+                  <span style={{ fontSize: '0.74rem', color: '#EF4444', display: 'block', marginTop: '0.25rem' }}>
+                    {fieldErrors.phone}
+                  </span>
+                ) : (
+                  <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                    {isStudent ? 'Student personal mobile number' : 'Optional direct contact phone'}
+                  </span>
+                )}
+              </div>
+
+              {isStudent && (
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 700, color: fieldErrors.parentPhone ? '#EF4444' : 'var(--text-secondary)', marginBottom: '0.35rem' }}>
+                    Parent&apos;s Number
+                  </label>
+                  <div style={{ position: 'relative' }}>
+                    <Phone size={15} color={fieldErrors.parentPhone ? '#EF4444' : 'var(--text-muted)'} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)' }} />
+                    <input
+                      type="tel"
+                      placeholder="+91 98765 43210"
+                      value={formData.parentPhone}
+                      onChange={(e) => {
+                        setFormData({ ...formData, parentPhone: e.target.value });
+                        if (fieldErrors.parentPhone) setFieldErrors({ ...fieldErrors, parentPhone: null });
+                      }}
+                      style={{
+                        width: '100%',
+                        paddingLeft: '2.4rem',
+                        fontSize: '0.88rem',
+                        borderColor: fieldErrors.parentPhone ? '#EF4444' : undefined
+                      }}
+                    />
+                  </div>
+                  {fieldErrors.parentPhone ? (
+                    <span style={{ fontSize: '0.74rem', color: '#EF4444', display: 'block', marginTop: '0.25rem' }}>
+                      {fieldErrors.parentPhone}
+                    </span>
+                  ) : (
+                    <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                      Parent or guardian contact number for critical updates
+                    </span>
+                  )}
+                </div>
+              )}
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 700, color: fieldErrors.address ? '#EF4444' : 'var(--text-secondary)', marginBottom: '0.35rem' }}>
+                  {isStudent ? 'Residential / Mailing Address' : 'Campus / Office Address'}
+                </label>
+                <div style={{ position: 'relative' }}>
+                  <MapPin size={15} color={fieldErrors.address ? '#EF4444' : 'var(--text-muted)'} style={{ position: 'absolute', left: '12px', top: '14px' }} />
+                  <input
+                    type="text"
+                    placeholder={isStudent ? 'e.g. 142 Elm Street, Suite 4B' : 'e.g. Faculty Building B, Office 302'}
+                    value={formData.address}
+                    onChange={(e) => {
+                      setFormData({ ...formData, address: e.target.value });
+                      if (fieldErrors.address) setFieldErrors({ ...fieldErrors, address: null });
+                    }}
+                    style={{
+                      width: '100%',
+                      paddingLeft: '2.4rem',
+                      fontSize: '0.88rem',
+                      borderColor: fieldErrors.address ? '#EF4444' : undefined
+                    }}
+                  />
+                </div>
+                {fieldErrors.address ? (
+                  <span style={{ fontSize: '0.74rem', color: '#EF4444', display: 'block', marginTop: '0.25rem' }}>
+                    {fieldErrors.address}
+                  </span>
+                ) : (
+                  <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                    {isStudent ? 'Residential mailing address for student records' : 'Optional office or mailing address'}
+                  </span>
+                )}
+              </div>
+            </div>
 
           {/* Emergency Contact Block — Only for students */}
           {isStudent && (
@@ -668,12 +959,11 @@ export const SettingsView = ({ onCancel }) => {
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem' }}>
                 <div>
                   <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 700, color: fieldErrors.emergencyName ? '#EF4444' : 'var(--text-secondary)', marginBottom: '0.35rem' }}>
-                    Emergency Contact Full Name *
+                    Emergency Contact Name (Optional)
                   </label>
                   <input
                     type="text"
-                    required
-                    placeholder="e.g. Margaret Miller"
+                    placeholder="e.g. Parent / Guardian Name"
                     value={formData.emergencyContact.name}
                     onChange={(e) => {
                       setFormData({
@@ -697,13 +987,12 @@ export const SettingsView = ({ onCancel }) => {
 
                 <div>
                   <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 700, color: fieldErrors.emergencyPhone ? '#EF4444' : 'var(--text-secondary)', marginBottom: '0.35rem' }}>
-                    Emergency Phone Number *
+                    Emergency Phone Number (Optional)
                   </label>
                   <input
                     type="tel"
-                    required
-                    placeholder="e.g. +1 (555) 987-6543"
-                    value={formData.emergencyContact.phone}
+                    placeholder="e.g. +91 98765 43210"
+                    value={formData.emergencyContact.phone || formData.parentPhone}
                     onChange={(e) => {
                       setFormData({
                         ...formData,
