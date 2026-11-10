@@ -410,6 +410,7 @@ export const SchoolCodeLabView = () => {
   const [executionMetrics, setExecutionMetrics] = useState(null);
   const [outputTab, setOutputTab] = useState('output'); // 'output' | 'stdin' | 'errors' | 'telemetry'
   const [stdinInput, setStdinInput] = useState('');
+  const [isManualStdin, setIsManualStdin] = useState(false);
   const [interactiveInputVal, setInteractiveInputVal] = useState('');
   const [isWaitingForInput, setIsWaitingForInput] = useState(false);
   const [inputPromptMessage, setInputPromptMessage] = useState('');
@@ -515,6 +516,39 @@ export const SchoolCodeLabView = () => {
       const outText = run.output || run.stdout || '';
       const errText = run.stderr || '';
       const exitCode = run.code ?? 0;
+
+      // DETECT EOF / STDIN WAITING (Python input() or C++ EOF)
+      const isEofError = Boolean(
+        errText && (
+          errText.includes('EOFError') ||
+          errText.includes('EOF when reading') ||
+          errText.includes('End of file')
+        )
+      );
+
+      if (isEofError) {
+        // Program requested input via input() but stdin had no more lines
+        // Extract the prompt from outText
+        const lines = outText.trimEnd().split('\n');
+        const lastLine = (lines[lines.length - 1] || '').trim();
+        const detectedPrompt = lastLine || 'Program waiting for user input:';
+
+        setInputPromptMessage(detectedPrompt);
+        setIsWaitingForInput(true);
+        setExecutionState('WAITING FOR INPUT');
+        setStdout(outText);
+        setStderr('');
+        setOutputTab('output');
+        setExecutionMetrics({
+          status: 'WAITING FOR INPUT',
+          exitCode: 0,
+          durationMs,
+          language: response.data?.language || currentLangConfig.label,
+          version: response.data?.version || 'Latest'
+        });
+        return;
+      }
+
       const state = exitCode === 0 ? 'COMPLETED' : 'FAILED';
 
       setExecutionState(state);
@@ -565,12 +599,13 @@ export const SchoolCodeLabView = () => {
     const isCpp = l.includes('c++') || l.includes('cpp') || l === 'c';
     const needsInput = (isPy && /\binput\s*\(/.test(code)) || (isCpp && /\b(cin\s*>>|scanf\s*\(|getline\s*\()/i.test(code));
 
-    if (needsInput && !stdinInput.trim()) {
-      let promptMsg = 'Program waiting for user input:';
-      if (isPy) {
-        const match = /input\s*\(\s*(['"`])(.*?)\1\s*\)/.exec(code);
-        if (match && match[2]) promptMsg = match[2];
-      }
+    // For C++, since standard cin >> does not throw a catchable EOF traceback,
+    // if stdin is completely empty, prompt the user in the terminal output before firing
+    if (isCpp && needsInput && !stdinInput.trim()) {
+      let promptMsg = 'Enter input for C++ program (cin):';
+      const match = /(?:cout\s*<<\s*|printf\s*\(\s*)(['"`])(.*?)\1/.exec(code);
+      if (match && match[2]) promptMsg = match[2];
+
       setInputPromptMessage(promptMsg);
       setIsWaitingForInput(true);
       setOutputTab('output');
@@ -578,16 +613,30 @@ export const SchoolCodeLabView = () => {
       return;
     }
 
-    executeWithInput(stdinInput);
-  }, [isRunning, language, code, stdinInput, executeWithInput]);
+    // For Python and general runs: start with base stdin (from STDIN tab if manually configured)
+    const baseInput = isManualStdin ? stdinInput : '';
+    setStdinInput(baseInput);
+    executeWithInput(baseInput);
+  }, [isRunning, language, code, stdinInput, isManualStdin, executeWithInput]);
 
   const handleTerminalInputSubmit = (val) => {
-    const inputVal = (val !== undefined ? val : interactiveInputVal).trim();
-    if (!inputVal) return;
-    const combined = stdinInput.trim() ? `${stdinInput.trim()}\n${inputVal}\n` : `${inputVal}\n`;
+    const inputVal = val !== undefined ? val : interactiveInputVal;
+    if (inputVal === undefined || inputVal === null) return;
+    const lineToAppend = inputVal.trim();
+    const combined = stdinInput ? `${stdinInput.trimEnd()}\n${lineToAppend}\n` : `${lineToAppend}\n`;
     setStdinInput(combined);
     setInteractiveInputVal('');
     executeWithInput(combined);
+  };
+
+  const handleRestartSession = () => {
+    setStdinInput('');
+    setIsManualStdin(false);
+    setIsWaitingForInput(false);
+    setInteractiveInputVal('');
+    setStdout('');
+    setStderr('');
+    executeWithInput('');
   };
 
   // Reset Editor to template
@@ -602,6 +651,10 @@ export const SchoolCodeLabView = () => {
     }
     setStdout('');
     setStderr('');
+    setStdinInput('');
+    setIsManualStdin(false);
+    setIsWaitingForInput(false);
+    setInteractiveInputVal('');
     setExecutionState('READY');
     setExecutionMetrics(null);
   };
@@ -610,9 +663,13 @@ export const SchoolCodeLabView = () => {
   const handleClearOutput = () => {
     setStdout('');
     setStderr('');
+    setStdinInput('');
+    setIsManualStdin(false);
+    setIsWaitingForInput(false);
+    setInteractiveInputVal('');
     setExecutionState('READY');
     setExecutionMetrics(null);
-    addToast('Console Cleared', 'Output and error logs cleared.', 'subtle');
+    addToast('Console Cleared', 'Output and input buffers cleared.', 'subtle');
   };
 
   return (
@@ -1181,6 +1238,8 @@ export const SchoolCodeLabView = () => {
                       ? 'rgba(5, 150, 105, 0.15)'
                       : executionState === 'RUNNING'
                       ? 'rgba(37, 99, 235, 0.15)'
+                      : executionState === 'WAITING FOR INPUT'
+                      ? 'rgba(245, 158, 11, 0.15)'
                       : executionState === 'FAILED'
                       ? 'rgba(239, 68, 68, 0.15)'
                       : 'rgba(148, 163, 184, 0.15)',
@@ -1189,6 +1248,8 @@ export const SchoolCodeLabView = () => {
                       ? '#34D399'
                       : executionState === 'RUNNING'
                       ? '#38BDF8'
+                      : executionState === 'WAITING FOR INPUT'
+                      ? '#FBBF24'
                       : executionState === 'FAILED'
                       ? '#F87171'
                       : '#94A3B8'
@@ -1232,10 +1293,28 @@ export const SchoolCodeLabView = () => {
 
                 {/* Interactive Terminal Input Prompt inside Output Panel */}
                 {isWaitingForInput && (
-                  <div style={{ marginTop: '0.5rem', padding: '0.75rem', borderRadius: '8px', backgroundColor: '#0B1120', border: '1px solid #38BDF8' }}>
-                    <div style={{ color: '#38BDF8', fontSize: '0.8rem', fontWeight: 600, marginBottom: '0.4rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                      <Terminal size={14} />
-                      <span>{inputPromptMessage || 'Program waiting for user input:'}</span>
+                  <div style={{ marginTop: '0.6rem', padding: '0.75rem', borderRadius: '8px', backgroundColor: '#0B1120', border: '1px solid #38BDF8' }}>
+                    <div style={{ color: '#38BDF8', fontSize: '0.8rem', fontWeight: 600, marginBottom: '0.4rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.4rem' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                        <Terminal size={14} />
+                        <span>{inputPromptMessage || 'Program waiting for user input:'}</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleRestartSession}
+                        style={{
+                          fontSize: '0.68rem',
+                          padding: '0.15rem 0.5rem',
+                          borderRadius: '4px',
+                          backgroundColor: '#1E293B',
+                          color: '#94A3B8',
+                          border: '1px solid #334155',
+                          cursor: 'pointer'
+                        }}
+                        title="Restart program execution from beginning"
+                      >
+                        ↺ Restart Session
+                      </button>
                     </div>
                     <form
                       onSubmit={(e) => {
@@ -1251,7 +1330,7 @@ export const SchoolCodeLabView = () => {
                           autoFocus
                           value={interactiveInputVal}
                           onChange={(e) => setInteractiveInputVal(e.target.value)}
-                          placeholder="Type input value here and press Enter (or separate multiple with space)..."
+                          placeholder="Type input value here and press Enter ↵..."
                           style={{ width: '100%', padding: '0.45rem 0', background: 'transparent', border: 'none', color: '#F8FAFC', outline: 'none', fontFamily: 'var(--font-mono)', fontSize: '0.82rem' }}
                         />
                       </div>
@@ -1305,7 +1384,10 @@ export const SchoolCodeLabView = () => {
                   {stdinInput && (
                     <button
                       type="button"
-                      onClick={() => setStdinInput('')}
+                      onClick={() => {
+                        setStdinInput('');
+                        setIsManualStdin(false);
+                      }}
                       style={{
                         padding: '0.2rem 0.5rem',
                         fontSize: '0.68rem',
@@ -1322,7 +1404,10 @@ export const SchoolCodeLabView = () => {
                 </div>
                 <textarea
                   value={stdinInput}
-                  onChange={(e) => setStdinInput(e.target.value)}
+                  onChange={(e) => {
+                    setStdinInput(e.target.value);
+                    setIsManualStdin(Boolean(e.target.value.trim()));
+                  }}
                   placeholder={`Enter inputs for your program line-by-line.\nExample:\n10\n20\n\n(For programs reading: num1 = float(input()), num2 = float(input()))`}
                   rows={4}
                   style={{
@@ -1355,13 +1440,7 @@ export const SchoolCodeLabView = () => {
                     </div>
                     <button
                       type="button"
-                      onClick={() => {
-                        setOutputTab('stdin');
-                        const prompted = requestUserInputIfNeeded(language, code, '');
-                        if (prompted) {
-                          setStdinInput(prompted);
-                        }
-                      }}
+                      onClick={() => setOutputTab('stdin')}
                       className="btn-primary"
                       style={{ fontSize: '0.76rem', padding: '0.35rem 0.85rem', backgroundColor: '#D97706', borderColor: '#D97706' }}
                     >

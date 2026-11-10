@@ -111,15 +111,16 @@ export const executeInBrowserSandbox = async (language, code, stdin = '') => {
       };
     } catch (pyErr) {
       const errMsg = pyErr.message || String(pyErr);
+      const trimmedOut = stdout.trimEnd();
       return {
         success: true,
         data: {
           language: 'python',
           version: '3.11.0 (Browser WebAssembly Sandbox)',
           run: {
-            stdout: '',
+            stdout: trimmedOut,
             stderr: errMsg,
-            output: errMsg,
+            output: trimmedOut ? `${trimmedOut}\n${errMsg}` : errMsg,
             code: 1,
             signal: null
           }

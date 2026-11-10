@@ -61,6 +61,7 @@ export const PythonSandbox = () => {
   // Execution & Output State
   const [outputTab, setOutputTab] = useState('output'); // 'output' | 'stdin' | 'errors' | 'details'
   const [stdinInput, setStdinInput] = useState('');
+  const [isManualStdin, setIsManualStdin] = useState(false);
   const [interactiveInputVal, setInteractiveInputVal] = useState('');
   const [isWaitingForInput, setIsWaitingForInput] = useState(false);
   const [inputPromptMessage, setInputPromptMessage] = useState('');
@@ -149,6 +150,39 @@ export const PythonSandbox = () => {
       const outText = run.output || run.stdout || '';
       const errText = run.stderr || '';
       const exitCode = run.code ?? 0;
+
+      // DETECT EOF / STDIN WAITING (Python input() or C++ EOF)
+      const isEofError = Boolean(
+        errText && (
+          errText.includes('EOFError') ||
+          errText.includes('EOF when reading') ||
+          errText.includes('End of file')
+        )
+      );
+
+      if (isEofError) {
+        const lines = outText.trimEnd().split('\n');
+        const lastLine = (lines[lines.length - 1] || '').trim();
+        const detectedPrompt = lastLine || 'Program waiting for user input:';
+
+        setInputPromptMessage(detectedPrompt);
+        setIsWaitingForInput(true);
+        setExecutionState('WAITING FOR INPUT');
+        setStdout(outText);
+        setStderr('');
+        setRawOutput(outText);
+        setOutputTab('output');
+        setExecutionMetrics({
+          status: 'WAITING FOR INPUT',
+          code: 0,
+          durationMs,
+          language: response.data?.language || currentLanguage.name,
+          version: response.data?.version || currentLanguage.version || 'Container',
+          byteCount: outText.length
+        });
+        return;
+      }
+
       const state = exitCode === 0 ? 'COMPLETED' : 'FAILED';
 
       setExecutionState(state);
@@ -204,12 +238,13 @@ export const PythonSandbox = () => {
     const isCpp = l.includes('c++') || l.includes('cpp') || l === 'c';
     const needsInput = (isPy && /\binput\s*\(/.test(code)) || (isCpp && /\b(cin\s*>>|scanf\s*\(|getline\s*\()/i.test(code));
 
-    if (needsInput && !stdinInput.trim()) {
-      let promptMsg = 'Program waiting for user input:';
-      if (isPy) {
-        const match = /input\s*\(\s*(['"`])(.*?)\1\s*\)/.exec(code);
-        if (match && match[2]) promptMsg = match[2];
-      }
+    // For C++, since standard cin >> does not throw a catchable EOF traceback,
+    // if stdin is completely empty, prompt the user in the terminal output before firing
+    if (isCpp && needsInput && !stdinInput.trim()) {
+      let promptMsg = 'Enter input for C++ program (cin):';
+      const match = /(?:cout\s*<<\s*|printf\s*\(\s*)(['"`])(.*?)\1/.exec(code);
+      if (match && match[2]) promptMsg = match[2];
+
       setInputPromptMessage(promptMsg);
       setIsWaitingForInput(true);
       setOutputTab('output');
@@ -217,16 +252,31 @@ export const PythonSandbox = () => {
       return;
     }
 
-    executeWithInput(stdinInput);
-  }, [isRunning, selectedLangId, code, stdinInput, executeWithInput]);
+    // For Python and general runs: start with base stdin (from STDIN tab if manually configured)
+    const baseInput = isManualStdin ? stdinInput : '';
+    setStdinInput(baseInput);
+    executeWithInput(baseInput);
+  }, [isRunning, selectedLangId, code, stdinInput, isManualStdin, executeWithInput]);
 
   const handleTerminalInputSubmit = (val) => {
-    const inputVal = (val !== undefined ? val : interactiveInputVal).trim();
-    if (!inputVal) return;
-    const combined = stdinInput.trim() ? `${stdinInput.trim()}\n${inputVal}\n` : `${inputVal}\n`;
+    const inputVal = val !== undefined ? val : interactiveInputVal;
+    if (inputVal === undefined || inputVal === null) return;
+    const lineToAppend = inputVal.trim();
+    const combined = stdinInput ? `${stdinInput.trimEnd()}\n${lineToAppend}\n` : `${lineToAppend}\n`;
     setStdinInput(combined);
     setInteractiveInputVal('');
     executeWithInput(combined);
+  };
+
+  const handleRestartSession = () => {
+    setStdinInput('');
+    setIsManualStdin(false);
+    setIsWaitingForInput(false);
+    setInteractiveInputVal('');
+    setStdout('');
+    setStderr('');
+    setRawOutput('');
+    executeWithInput('');
   };
 
   // Keyboard shortcut: Ctrl+Enter or Cmd+Enter to run
@@ -275,6 +325,9 @@ export const PythonSandbox = () => {
     switch (state) {
       case 'RUNNING':
         return { color: 'var(--accent-blue)', bg: 'rgba(37, 99, 235, 0.1)', icon: Clock, label: 'Running...' };
+      case 'WAITING FOR INPUT':
+      case 'INPUT REQUIRED':
+        return { color: '#FBBF24', bg: 'rgba(245, 158, 11, 0.15)', icon: Terminal, label: 'Waiting for Input' };
       case 'COMPLETED':
         return { color: 'var(--accent-primary)', bg: 'rgba(5, 150, 105, 0.1)', icon: CheckCircle2, label: 'Completed (Exit 0)' };
       case 'FAILED':
@@ -828,9 +881,28 @@ export const PythonSandbox = () => {
 
                 {/* Interactive Terminal Input Prompt inside Output Panel */}
                 {isWaitingForInput && (
-                  <div style={{ marginTop: '0.5rem', padding: '0.75rem', borderRadius: '8px', backgroundColor: '#111827', border: '1px solid #38BDF8' }}>
-                    <div style={{ color: '#38BDF8', fontSize: '0.8rem', fontWeight: 600, marginBottom: '0.4rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                      <span>{inputPromptMessage || 'Program waiting for user input:'}</span>
+                  <div style={{ marginTop: '0.6rem', padding: '0.75rem', borderRadius: '8px', backgroundColor: '#111827', border: '1px solid #38BDF8' }}>
+                    <div style={{ color: '#38BDF8', fontSize: '0.8rem', fontWeight: 600, marginBottom: '0.4rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.4rem' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                        <Terminal size={14} />
+                        <span>{inputPromptMessage || 'Program waiting for user input:'}</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleRestartSession}
+                        style={{
+                          fontSize: '0.68rem',
+                          padding: '0.15rem 0.5rem',
+                          borderRadius: '4px',
+                          backgroundColor: '#1F2937',
+                          color: '#9CA3AF',
+                          border: '1px solid #374151',
+                          cursor: 'pointer'
+                        }}
+                        title="Restart program execution from beginning"
+                      >
+                        ↺ Restart Session
+                      </button>
                     </div>
                     <form
                       onSubmit={(e) => {
@@ -846,7 +918,7 @@ export const PythonSandbox = () => {
                           autoFocus
                           value={interactiveInputVal}
                           onChange={(e) => setInteractiveInputVal(e.target.value)}
-                          placeholder="Type input value here and press Enter (or separate multiple with space)..."
+                          placeholder="Type input value here and press Enter ↵..."
                           style={{ width: '100%', padding: '0.45rem 0', background: 'transparent', border: 'none', color: '#F8FAFC', outline: 'none', fontFamily: 'var(--font-mono)', fontSize: '0.82rem' }}
                         />
                       </div>
@@ -900,7 +972,10 @@ export const PythonSandbox = () => {
                   {stdinInput && (
                     <button
                       type="button"
-                      onClick={() => setStdinInput('')}
+                      onClick={() => {
+                        setStdinInput('');
+                        setIsManualStdin(false);
+                      }}
                       style={{
                         padding: '0.15rem 0.45rem',
                         fontSize: '0.65rem',
@@ -917,7 +992,10 @@ export const PythonSandbox = () => {
                 </div>
                 <textarea
                   value={stdinInput}
-                  onChange={(e) => setStdinInput(e.target.value)}
+                  onChange={(e) => {
+                    setStdinInput(e.target.value);
+                    setIsManualStdin(Boolean(e.target.value.trim()));
+                  }}
                   placeholder={`Enter program inputs line-by-line.\nExample:\n10\n20\n\n(For: num1 = float(input()), num2 = float(input()))`}
                   rows={4}
                   style={{
@@ -950,13 +1028,7 @@ export const PythonSandbox = () => {
                     </div>
                     <button
                       type="button"
-                      onClick={() => {
-                        setOutputTab('stdin');
-                        const prompted = requestUserInputIfNeeded(selectedLangId, code, '');
-                        if (prompted) {
-                          setStdinInput(prompted);
-                        }
-                      }}
+                      onClick={() => setOutputTab('stdin')}
                       className="btn-primary"
                       style={{ fontSize: '0.76rem', padding: '0.35rem 0.85rem', backgroundColor: '#D97706', borderColor: '#D97706' }}
                     >
