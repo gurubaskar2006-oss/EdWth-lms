@@ -805,9 +805,9 @@ const AdminDashboard = ({ onOpenCreateBatch, onOpenProvisionTrainer, onNavigateT
     try {
       const [ovRes, auditRes] = await Promise.all([
         apiService.getAdminOverview(),
-        apiService.getAdminAuditLogs()
+        apiService.getAdminAuditLogs().catch(() => ({ logs: [] }))
       ]);
-      if (ovRes?.success) {
+      if (ovRes?.success && ovRes.data) {
         setOverview(ovRes.data);
       } else {
         setError(ovRes?.message || 'Failed to load overview data.');

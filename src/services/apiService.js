@@ -184,7 +184,11 @@ export const apiService = {
     const authHeader = token ? { 'Authorization': `Bearer ${token}` } : {};
 
     const activeTenantId = getActiveTenantId();
-    const tenantHeader = activeTenantId ? { 'x-tenant-id': activeTenantId } : {};
+    const isGlobalOversightPath =
+      targetUrl.includes('/admin/overview') ||
+      targetUrl.includes('/admin/schools') ||
+      targetUrl.includes('/admin/institutions');
+    const tenantHeader = (activeTenantId && !isGlobalOversightPath) ? { 'x-tenant-id': activeTenantId } : {};
 
     const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData;
     const defaultHeaders = isFormData ? {} : { 'Content-Type': 'application/json' };

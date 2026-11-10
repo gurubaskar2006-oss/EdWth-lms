@@ -55,13 +55,36 @@ router.use(requireIdempotency());
  */
 const getAdminTenantFilter = (req) => {
   if (req.user.role === 'superadmin') {
-    const filterId = req.query.tenantId || req.query.collegeId || req.headers['x-tenant-id'];
-    if (filterId && mongoose.Types.ObjectId.isValid(filterId)) {
+    // Platform-wide oversight: SuperAdmin reads cross-tenant by default.
+    // Tenant filtering only applies when explicitly passed via query parameter.
+    const filterId = req.query.tenantId || req.query.collegeId;
+    if (filterId) {
+      const is24Hex = typeof filterId === 'string' && /^[0-9a-fA-F]{24}$/.test(filterId);
+      if (is24Hex && mongoose.Types.ObjectId.isValid(filterId)) {
+        return {
+          $or: [
+            { tenantId: filterId },
+            { tenantId: new mongoose.Types.ObjectId(filterId) }
+          ]
+        };
+      }
       return { tenantId: filterId };
     }
     return {}; // Cross-tenant company-wide oversight for 6th Civilians Corporation
   }
-  return { tenantId: req.tenantId };
+  if (req.tenantId) {
+    const is24Hex = typeof req.tenantId === 'string' && /^[0-9a-fA-F]{24}$/.test(req.tenantId);
+    if (is24Hex && mongoose.Types.ObjectId.isValid(req.tenantId)) {
+      return {
+        $or: [
+          { tenantId: req.tenantId },
+          { tenantId: new mongoose.Types.ObjectId(req.tenantId) }
+        ]
+      };
+    }
+    return { tenantId: req.tenantId };
+  }
+  return {};
 };
 
 /**
@@ -72,8 +95,8 @@ const getAdminTenantFilter = (req) => {
  */
 router.get('/overview', async (req, res) => {
   try {
+    const isSuperAdmin = req.user.role === 'superadmin';
     const tenantFilter = getAdminTenantFilter(req);
-    const isSuperAdmin = req.user.role === 'superadmin' && Object.keys(tenantFilter).length === 0;
 
     let students = 0, trainers = 0, admins = 0, courses = 0, batches = 0, institutions = 0;
     let activeInstitutions = 0, pendingSetupInstitutions = 0, incompleteProfiles = 0, pendingGrading = 0;
@@ -88,7 +111,16 @@ router.get('/overview', async (req, res) => {
     }
 
     try {
-      const instScope = isSuperAdmin ? {} : { _id: req.tenantId };
+      let instScope = {};
+      if (!isSuperAdmin && req.tenantId) {
+        instScope = { _id: req.tenantId };
+      } else if (isSuperAdmin && (req.query.tenantId || req.query.collegeId)) {
+        const targetId = req.query.tenantId || req.query.collegeId;
+        const is24Hex = typeof targetId === 'string' && /^[0-9a-fA-F]{24}$/.test(targetId);
+        instScope = is24Hex && mongoose.Types.ObjectId.isValid(targetId)
+          ? { $or: [{ _id: new mongoose.Types.ObjectId(targetId) }, { code: targetId }] }
+          : { code: targetId };
+      }
       const [
         counts,
         activeInstCount,
@@ -187,17 +219,38 @@ router.get('/batches', async (req, res) => {
 router.post('/batches', async (req, res) => {
   try {
     const isSuperAdmin = req.user.role === 'superadmin';
-    const targetTenantId = isSuperAdmin
+    let rawTargetId = isSuperAdmin
       ? (req.body.targetTenantId || req.body.tenantId || req.body.collegeId || req.headers['x-tenant-id'] || req.query.tenantId)
       : req.tenantId;
 
-    if (!targetTenantId || !mongoose.Types.ObjectId.isValid(targetTenantId)) {
-      return res.status(400).json({ success: false, message: 'Valid target institution (tenantId) is required to create a batch.' });
+    let targetTenantId = null;
+    let targetCollege = null;
+
+    if (rawTargetId) {
+      const is24Hex = typeof rawTargetId === 'string' && /^[0-9a-fA-F]{24}$/.test(rawTargetId);
+      targetCollege = await College.findOne({
+        $or: [
+          ...(is24Hex && mongoose.Types.ObjectId.isValid(rawTargetId) ? [{ _id: rawTargetId }] : []),
+          { code: rawTargetId },
+          { slug: rawTargetId }
+        ],
+        status: 'active'
+      });
+      if (targetCollege) {
+        targetTenantId = targetCollege._id;
+      } else if (is24Hex && mongoose.Types.ObjectId.isValid(rawTargetId)) {
+        targetTenantId = rawTargetId;
+      }
+    } else if (isSuperAdmin) {
+      const activeColleges = await College.find({ status: 'active' }).limit(2).lean();
+      if (activeColleges.length === 1) {
+        targetCollege = activeColleges[0];
+        targetTenantId = targetCollege._id;
+      }
     }
 
-    const targetCollege = await College.findOne({ _id: targetTenantId, status: 'active' });
-    if (!targetCollege) {
-      return res.status(400).json({ success: false, message: 'Specified target institution does not exist or is inactive.' });
+    if (!targetTenantId || !mongoose.Types.ObjectId.isValid(targetTenantId)) {
+      return res.status(400).json({ success: false, message: 'Valid target institution (tenantId) is required to create a batch.' });
     }
 
     const { name, ...rest } = req.body;
@@ -1815,11 +1868,12 @@ router.get('/institutions', async (req, res) => {
 
     // Enrich with real persisted records per institution
     const enriched = await Promise.all((colleges || []).map(async (c) => {
+      const sId = c._id;
       const [studentsCount, trainersCount, batchesCount, coursesCount] = await Promise.all([
-        User.countDocuments({ tenantId: c._id, role: 'student', soft_deleted: { $ne: true } }),
-        User.countDocuments({ tenantId: c._id, role: 'trainer', soft_deleted: { $ne: true } }),
-        Batch.countDocuments({ tenantId: c._id }),
-        Course.countDocuments({ tenantId: c._id })
+        User.countDocuments({ tenantId: sId, role: 'student', soft_deleted: { $ne: true } }),
+        User.countDocuments({ tenantId: sId, role: { $in: ['trainer', 'teacher'] }, soft_deleted: { $ne: true } }),
+        Batch.countDocuments({ tenantId: sId }),
+        Course.countDocuments({ tenantId: sId })
       ]);
       return {
         ...c,
@@ -2069,9 +2123,14 @@ router.put('/institutions/:id', async (req, res) => {
 router.get('/schools', async (req, res) => {
   try {
     const isSuperAdmin = req.user.role === 'superadmin';
-    const filter = isSuperAdmin
-      ? { institutionType: 'school' }
-      : { _id: req.tenantId, institutionType: 'school' };
+    let filter = isSuperAdmin
+      ? {
+          $or: [
+            { institutionType: 'school' },
+            { name: { $regex: /school|matriculation|vidyalaya|academy|higher secondary/i } }
+          ]
+        }
+      : { _id: req.tenantId };
 
     // Exclude archived schools by default
     if (req.query.status === 'archived') {
@@ -2080,7 +2139,15 @@ router.get('/schools', async (req, res) => {
       filter.status = { $ne: 'archived' };
     }
 
-    const schools = await College.find(filter).sort({ name: 1 }).lean();
+    let schools = await College.find(filter).sort({ name: 1 }).lean();
+
+    // Fallback if no explicit school matches: return all registered colleges/schools for superadmin
+    if (isSuperAdmin && (!schools || schools.length === 0)) {
+      const fallbackFilter = req.query.status === 'archived'
+        ? { status: 'archived' }
+        : (req.query.status !== 'all' ? { status: { $ne: 'archived' } } : {});
+      schools = await College.find(fallbackFilter).sort({ name: 1 }).lean();
+    }
 
     const enriched = await Promise.all(schools.map(async (school) => {
       const sId = school._id;
@@ -2088,7 +2155,7 @@ router.get('/schools', async (req, res) => {
         User.find({ tenantId: sId, role: 'student', soft_deleted: { $ne: true } })
           .select('className standard group section rollNumber batchId name email studentId streakDays stats schoolProfile')
           .lean(),
-        User.find({ tenantId: sId, role: 'trainer', soft_deleted: { $ne: true } })
+        User.find({ tenantId: sId, role: { $in: ['trainer', 'teacher'] }, soft_deleted: { $ne: true } })
           .select('name email department')
           .lean(),
         Batch.find({ tenantId: sId }).sort({ createdAt: -1 }).lean()
@@ -2302,29 +2369,32 @@ router.get('/schools/comparison', async (req, res) => {
 router.get('/schools/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({ success: false, message: 'Invalid school ID format.' });
+    let school = null;
+    if (mongoose.Types.ObjectId.isValid(id) && id.length === 24) {
+      school = await College.findById(id).lean();
     }
-
-    if (req.user.role !== 'superadmin' && req.tenantId?.toString() !== id) {
-      return res.status(403).json({ success: false, message: 'Unauthorized school inspection scope.' });
+    if (!school) {
+      school = await College.findOne({ $or: [{ code: id }, { slug: id }] }).lean();
     }
-
-    const school = await College.findById(id).lean();
     if (!school) {
       return res.status(404).json({ success: false, message: 'School not found.' });
     }
 
+    const schoolId = school._id;
+    if (req.user.role !== 'superadmin' && req.tenantId?.toString() !== schoolId.toString()) {
+      return res.status(403).json({ success: false, message: 'Unauthorized school inspection scope.' });
+    }
+
     const [students, trainers, batches, courses, recentAssessments] = await Promise.all([
-      User.find({ tenantId: id, role: 'student', soft_deleted: { $ne: true } })
+      User.find({ tenantId: schoolId, role: 'student', soft_deleted: { $ne: true } })
         .select('name studentId email className standard group section rollNumber batchId streakDays stats createdAt schoolProfile')
         .lean(),
-      User.find({ tenantId: id, role: 'trainer', soft_deleted: { $ne: true } })
+      User.find({ tenantId: schoolId, role: { $in: ['trainer', 'teacher'] }, soft_deleted: { $ne: true } })
         .select('name email department')
         .lean(),
-      Batch.find({ tenantId: id }).sort({ createdAt: -1 }).lean(),
-      Course.find({ tenantId: id }).lean(),
-      Assessment.find({ tenantId: id }).sort({ date: -1 }).limit(10).lean()
+      Batch.find({ tenantId: schoolId }).sort({ createdAt: -1 }).lean(),
+      Course.find({ tenantId: schoolId }).lean(),
+      Assessment.find({ tenantId: schoolId }).sort({ date: -1 }).limit(10).lean()
     ]);
 
     let class11Count = 0;
@@ -3440,17 +3510,38 @@ router.post('/courses', async (req, res) => {
     }
 
     const isSuperAdmin = req.user.role === 'superadmin';
-    const targetTenant = isSuperAdmin
+    const rawTargetTenant = isSuperAdmin
       ? (targetTenantId || req.body.tenantId || req.body.collegeId || req.headers['x-tenant-id'] || req.query.tenantId)
       : req.tenantId;
 
-    if (!targetTenant || !mongoose.Types.ObjectId.isValid(targetTenant)) {
-      return res.status(400).json({ success: false, message: 'Target tenant ID is required.' });
+    let targetTenant = null;
+    let targetCollege = null;
+
+    if (rawTargetTenant) {
+      const is24Hex = typeof rawTargetTenant === 'string' && /^[0-9a-fA-F]{24}$/.test(rawTargetTenant);
+      targetCollege = await College.findOne({
+        $or: [
+          ...(is24Hex && mongoose.Types.ObjectId.isValid(rawTargetTenant) ? [{ _id: rawTargetTenant }] : []),
+          { code: rawTargetTenant },
+          { slug: rawTargetTenant }
+        ],
+        status: 'active'
+      });
+      if (targetCollege) {
+        targetTenant = targetCollege._id;
+      } else if (is24Hex && mongoose.Types.ObjectId.isValid(rawTargetTenant)) {
+        targetTenant = rawTargetTenant;
+      }
+    } else if (isSuperAdmin) {
+      const activeColleges = await College.find({ status: 'active' }).limit(2).lean();
+      if (activeColleges.length === 1) {
+        targetCollege = activeColleges[0];
+        targetTenant = targetCollege._id;
+      }
     }
 
-    const targetCollege = await College.findOne({ _id: targetTenant, status: 'active' });
-    if (!targetCollege) {
-      return res.status(400).json({ success: false, message: 'Specified target institution does not exist or is inactive.' });
+    if (!targetTenant || !mongoose.Types.ObjectId.isValid(targetTenant)) {
+      return res.status(400).json({ success: false, message: 'Target tenant ID is required.' });
     }
 
     let assignedTrainer = null;
