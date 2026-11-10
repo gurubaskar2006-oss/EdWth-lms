@@ -337,37 +337,49 @@ router.get('/students', async (req, res) => {
         ? new mongoose.Types.ObjectId(req.user._id)
         : req.user._id;
 
-      const userBatchOid = (req.user.batchId && mongoose.Types.ObjectId.isValid(req.user.batchId))
-        ? new mongoose.Types.ObjectId(req.user.batchId)
-        : null;
+      const userBatches = req.user.assignedBatches || (req.user.batchId ? [req.user.batchId] : []);
+      const userBatchOids = userBatches.filter(b => mongoose.Types.ObjectId.isValid(b)).map(b => new mongoose.Types.ObjectId(b));
 
       const assignedBatches = await Batch.find({
         tenantId: req.tenantId,
         $or: [
-          ...(userBatchOid ? [{ _id: userBatchOid }] : []),
+          ...(userBatchOids.length > 0 ? [{ _id: { $in: userBatchOids } }] : []),
           { assignedTrainers: trainerOid },
           { assignedTrainers: req.user._id }
         ]
       }).select('_id name targetClass').lean();
 
       const batchIds = assignedBatches.map((b) => b._id);
-      if (userBatchOid && !batchIds.some((id) => id.toString() === userBatchOid.toString())) {
-        batchIds.push(userBatchOid);
-      }
+      userBatchOids.forEach((oid) => {
+        if (!batchIds.some((id) => id.toString() === oid.toString())) {
+          batchIds.push(oid);
+        }
+      });
 
       if (batchIds.length > 0) {
         const batchNames = assignedBatches.map((b) => b.name).filter(Boolean);
         const targetClasses = assignedBatches.map((b) => b.targetClass).filter(Boolean);
         const classNames = [...new Set([...batchNames, ...targetClasses])];
 
-        query.$or = [
-          { batchId: { $in: batchIds } },
-          ...(classNames.length > 0 ? [
-            { className: { $in: classNames } },
-            { batch: { $in: classNames } },
-            { standard: { $in: targetClasses } },
-            { 'schoolProfile.standard': { $in: targetClasses } }
-          ] : [])
+        query.$and = [
+          {
+            $or: [
+              { batchId: { $in: batchIds } },
+              {
+                $and: [
+                  { batchId: { $in: [null, undefined] } },
+                  {
+                    $or: [
+                      { className: { $in: classNames } },
+                      { batch: { $in: classNames } },
+                      { standard: { $in: targetClasses } },
+                      { 'schoolProfile.standard': { $in: targetClasses } }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
         ];
       } else {
         // Strict boundary: When educator has no assigned cohorts in this tenant, return empty list
@@ -1175,12 +1187,44 @@ router.get('/homework', async (req, res) => {
     if (req.query.includeArchived !== 'true') {
       tenantFilter.status = { $ne: 'archived' };
     }
+
+    let trainerBatchIds = [];
+    if (req.user.role === 'trainer' || req.user.role === 'teacher') {
+      const trainerOid = (req.user._id && mongoose.Types.ObjectId.isValid(req.user._id))
+        ? new mongoose.Types.ObjectId(req.user._id)
+        : req.user._id;
+
+      const userBatches = req.user.assignedBatches || (req.user.batchId ? [req.user.batchId] : []);
+      const userBatchOids = userBatches.filter(b => mongoose.Types.ObjectId.isValid(b)).map(b => new mongoose.Types.ObjectId(b));
+
+      const assignedBatches = await Batch.find({
+        tenantId: req.tenantId,
+        $or: [
+          ...(userBatchOids.length > 0 ? [{ _id: { $in: userBatchOids } }] : []),
+          { assignedTrainers: trainerOid },
+          { assignedTrainers: req.user._id }
+        ]
+      }).select('_id name targetClass').lean();
+
+      trainerBatchIds = assignedBatches.map((b) => b._id.toString());
+      userBatchOids.forEach((oid) => {
+        if (!trainerBatchIds.includes(oid.toString())) {
+          trainerBatchIds.push(oid.toString());
+        }
+      });
+    }
+
     const assignments = await Assignment.find(tenantFilter)
       .populate('batchId', 'name grade section')
       .sort({ dueDate: -1 })
       .lean();
 
-    const students = await User.find({ ...tenantFilter, role: 'student', soft_deleted: { $ne: true } })
+    const studentFilter = { ...tenantFilter, role: 'student', soft_deleted: { $ne: true } };
+    if (trainerBatchIds.length > 0) {
+      studentFilter.batchId = { $in: trainerBatchIds.map(id => new mongoose.Types.ObjectId(id)) };
+    }
+
+    const students = await User.find(studentFilter)
       .populate('batchId', 'name grade section')
       .lean();
 
