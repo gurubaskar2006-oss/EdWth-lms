@@ -62,6 +62,23 @@ router.get('/courses', protect, async (req, res) => {
     const filter = getTenantQueryFilter(req, res);
     if (!filter) return;
 
+    // Filter courses for student by their assigned class/cohort
+    if (req.user?.role === 'student') {
+      const std = req.user.standard || req.user.schoolProfile?.standard || (req.user.className?.includes('12') ? 'Class 12' : (req.user.className?.includes('11') ? 'Class 11' : ''));
+      const batchOid = (req.user.batchId && mongoose.Types.ObjectId.isValid(req.user.batchId)) ? new mongoose.Types.ObjectId(req.user.batchId) : null;
+
+      if (std) {
+        filter.$or = [
+          { className: { $regex: new RegExp(std, 'i') } },
+          { targetClass: { $regex: new RegExp(std, 'i') } },
+          ...(batchOid ? [{ batchId: batchOid }] : []),
+          { className: { $exists: false } },
+          { className: null },
+          { className: '' }
+        ];
+      }
+    }
+
     const courses = await Course.find(filter).lean();
     return res.json(courses);
   } catch (error) {

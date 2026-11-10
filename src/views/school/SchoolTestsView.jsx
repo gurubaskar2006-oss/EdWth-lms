@@ -179,12 +179,29 @@ export const SchoolTestsView = ({ onOpenAssessmentModal }) => {
                     <span style={{ color: '#EF4444', fontWeight: 600, fontSize: '0.82rem' }}>
                       Missed Window
                     </span>
-                  ) : t.challenge ? (
+                  ) : (t.challenge || (t.questions && t.questions.length > 0) || t.isCodingExam) ? (
                     <button
-                      onClick={() => onOpenAssessmentModal && onOpenAssessmentModal({
-                        ...t.challenge,
-                        durationMinutes: t.durationMinutes || (t.isCodingExam ? 90 : 45)
-                      })}
+                      onClick={() => {
+                        const codingQ = (t.questions || []).find((q) => q.type === 'coding');
+                        const challengePayload = t.challenge || {
+                          id: t.id || t._id,
+                          title: t.title,
+                          subject: t.subject,
+                          language: t.language || codingQ?.language || 'python',
+                          description: t.description || `${t.title} (${t.subject})`,
+                          questions: t.questions || [],
+                          testCases: codingQ?.testCases || [],
+                          codeSnippets: codingQ?.starterCode ? { [codingQ.language || 'python']: codingQ.starterCode } : undefined,
+                          durationMinutes: t.durationMinutes || 45,
+                          totalMarks: t.totalMarks || 100
+                        };
+                        if (onOpenAssessmentModal) {
+                          onOpenAssessmentModal({
+                            ...challengePayload,
+                            durationMinutes: t.durationMinutes || challengePayload.durationMinutes || 45
+                          });
+                        }
+                      }}
                       className="btn-primary"
                       style={{
                         padding: '0.45rem 1.1rem',
@@ -195,7 +212,7 @@ export const SchoolTestsView = ({ onOpenAssessmentModal }) => {
                       }}
                     >
                       <Play size={13} fill="currentColor" />
-                      <span>Start Coding Test</span>
+                      <span>Start Test</span>
                     </button>
                   ) : (
                     <span style={{ color: '#059669', fontWeight: 700, fontSize: '0.82rem' }}>Scheduled: {t.date}</span>

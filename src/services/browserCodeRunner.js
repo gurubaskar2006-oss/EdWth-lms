@@ -85,12 +85,6 @@ export const executeInBrowserSandbox = async (language, code, stdin = '') => {
           if (stdinIndex < stdinLines.length) {
             return stdinLines[stdinIndex++];
           }
-          if (typeof window !== 'undefined' && typeof window.prompt === 'function') {
-            const promptVal = window.prompt('Standard Input (stdin) requested by program:');
-            if (promptVal !== null) {
-              return promptVal;
-            }
-          }
           return null;
         }
       });

@@ -37,6 +37,24 @@ const assignmentSchema = new mongoose.Schema({
   weight: String,
   description: String,
   requirements: [String],
+  questions: [{
+    id: { type: String, default: () => new mongoose.Types.ObjectId().toString() },
+    type: { type: String, enum: ['mcq', 'coding', 'sql', 'descriptive', 'paragraph'], default: 'descriptive' },
+    title: { type: String, default: '' },
+    prompt: { type: String, default: '' },
+    language: { type: String, default: 'python' },
+    options: [{ type: String }],
+    correctAnswer: { type: mongoose.Schema.Types.Mixed, default: null },
+    starterCode: { type: String, default: '' },
+    testCases: [{
+      id: { type: String, default: () => new mongoose.Types.ObjectId().toString() },
+      input: { type: String, default: '' },
+      expectedOutput: { type: String, default: '' },
+      isHidden: { type: Boolean, default: false },
+      marks: { type: Number, default: 5 }
+    }],
+    marks: { type: Number, default: 10 }
+  }],
   attachments: [{
     name: String,
     url: String,

@@ -56,6 +56,12 @@ export const AssessmentEditorModal = ({ challenge, onClose }) => {
   const [copied, setCopied] = useState(false);
   const [showHint, setShowHint] = useState(false);
 
+  // Multiple Question support for mixed examinations
+  const hasMultipleQuestions = Array.isArray(challenge?.questions) && challenge.questions.length > 0;
+  const [activeQuestionIndex, setActiveQuestionIndex] = useState(0);
+  const [questionAnswers, setQuestionAnswers] = useState({});
+  const activeQuestion = hasMultipleQuestions ? challenge.questions[activeQuestionIndex] : null;
+
   // ─── Security & Proctoring States ──────────────────────────────────────────
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isFocusLost, setIsFocusLost] = useState(false);
@@ -507,12 +513,19 @@ export const AssessmentEditorModal = ({ challenge, onClose }) => {
     const isViolationsTermination = submitReason === 'TERMINATED_MAX_WARNINGS' || isTerminated || violationCount >= 3;
     try {
       if (challenge?.id) {
+        const structuredAnswers = hasMultipleQuestions ? challenge.questions.map((q) => ({
+          questionId: q.id,
+          type: q.type,
+          title: q.title || '',
+          answer: q.type === 'coding' ? code : (questionAnswers[q.id] !== undefined ? questionAnswers[q.id] : '')
+        })) : [{ code, language: selectedLangId }];
+
         await apiService.submitAssessment(challenge.id, {
           code,
           violationCount,
           isTerminated: isViolationsTermination,
           submissionReason: submitReason,
-          answers: [{ code, language: selectedLangId }]
+          answers: structuredAnswers
         });
       }
       safeExitFullscreen();
@@ -882,6 +895,67 @@ export const AssessmentEditorModal = ({ challenge, onClose }) => {
         </div>
       </header>
 
+      {/* ─── Question Navigation Bar (when multiple questions exist) ──── */}
+      {hasMultipleQuestions && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.5rem',
+            padding: '0.45rem 1.5rem',
+            backgroundColor: '#0F172A',
+            borderBottom: '1px solid #1E293B',
+            overflowX: 'auto'
+          }}
+        >
+          <span style={{ fontSize: '0.74rem', fontWeight: 800, color: '#94A3B8', textTransform: 'uppercase', marginRight: '0.25rem' }}>
+            Questions:
+          </span>
+          {challenge.questions.map((q, idx) => {
+            const isCurrent = activeQuestionIndex === idx;
+            const hasAns = questionAnswers[q.id] !== undefined || (q.type === 'coding' && code.trim().length > 0);
+            return (
+              <button
+                key={q.id || idx}
+                onClick={() => {
+                  setActiveQuestionIndex(idx);
+                  if (q.type === 'coding' && q.language) {
+                    setSelectedLangId(q.language === 'c++' ? 'cpp' : q.language);
+                  }
+                }}
+                style={{
+                  padding: '0.35rem 0.8rem',
+                  borderRadius: '6px',
+                  border: isCurrent ? '1.5px solid #3B82F6' : '1px solid #334155',
+                  backgroundColor: isCurrent ? '#1D4ED8' : '#1E293B',
+                  color: isCurrent ? '#FFFFFF' : '#CBD5E1',
+                  fontSize: '0.78rem',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px'
+                }}
+              >
+                <span>Q{idx + 1}</span>
+                <span
+                  style={{
+                    fontSize: '0.66rem',
+                    textTransform: 'uppercase',
+                    padding: '1px 5px',
+                    borderRadius: '4px',
+                    backgroundColor: 'rgba(255,255,255,0.15)'
+                  }}
+                >
+                  {q.type}
+                </span>
+                {hasAns && <span style={{ color: '#34D399', fontSize: '0.7rem' }}>✓</span>}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       {/* ─── Kiosk Workspace Toolbar ──────────────────────────────────────── */}
       <div
         style={{
@@ -1017,7 +1091,7 @@ export const AssessmentEditorModal = ({ challenge, onClose }) => {
           padding: '0.85rem 1.5rem 1.25rem'
         }}
       >
-        {/* LEFT: MONACO CODE EDITOR */}
+        {/* LEFT: MONACO CODE EDITOR OR MCQ / PARAGRAPH QUESTION */}
         <div
           style={{
             backgroundColor: '#0F172A',
@@ -1044,33 +1118,105 @@ export const AssessmentEditorModal = ({ challenge, onClose }) => {
               <span style={{ width: '10px', height: '10px', borderRadius: '50%', backgroundColor: '#F59E0B' }} />
               <span style={{ width: '10px', height: '10px', borderRadius: '50%', backgroundColor: '#10B981' }} />
               <span style={{ fontSize: '0.76rem', color: '#93C5FD', fontWeight: 700, fontFamily: 'var(--font-mono)', marginLeft: '6px' }}>
-                {currentLanguage.fileName || 'solution'} • Active Proctoring
+                {activeQuestion ? `Question ${activeQuestionIndex + 1}: ${activeQuestion.title || activeQuestion.type.toUpperCase()}` : (currentLanguage.fileName || 'solution')} • Active Proctoring
               </span>
             </div>
-            <button onClick={handleCopyCode} className="btn-icon" style={{ color: '#94A3B8' }} title="Copy Code">
-              {copied ? <Check size={12} color="#34D399" /> : <Copy size={12} />}
-            </button>
+            {(!activeQuestion || activeQuestion.type === 'coding') && (
+              <button onClick={handleCopyCode} className="btn-icon" style={{ color: '#94A3B8' }} title="Copy Code">
+                {copied ? <Check size={12} color="#34D399" /> : <Copy size={12} />}
+              </button>
+            )}
           </div>
 
-          <div style={{ flex: 1, position: 'relative' }}>
-            <Editor
-              height="100%"
-              language={selectedLangId === 'c' || selectedLangId === 'cpp' ? 'cpp' : selectedLangId}
-              theme="vs-dark"
-              value={code}
-              onChange={(value) => setCode(value || '')}
-              options={{
-                minimap: { enabled: false },
-                fontSize: 14,
-                fontFamily: 'var(--font-mono)',
-                scrollBeyondLastLine: false,
-                lineNumbers: 'on',
-                renderWhitespace: 'selection',
-                tabSize: 4,
-                readOnly: isTimeExpired
-              }}
-            />
-          </div>
+          {activeQuestion?.type === 'mcq' ? (
+            <div style={{ flex: 1, padding: '1.25rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              <div style={{ fontSize: '1rem', fontWeight: 700, color: '#F8FAFC', lineHeight: 1.5 }}>
+                {activeQuestion.prompt}
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
+                {(activeQuestion.options || []).map((opt, optIdx) => {
+                  const isSelected = Number(questionAnswers[activeQuestion.id]) === optIdx;
+                  return (
+                    <label
+                      key={optIdx}
+                      onClick={() => setQuestionAnswers((prev) => ({ ...prev, [activeQuestion.id]: optIdx }))}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.75rem',
+                        padding: '0.75rem 1rem',
+                        borderRadius: '10px',
+                        border: isSelected ? '1.5px solid #3B82F6' : '1px solid #334155',
+                        backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.15)' : '#1E293B',
+                        cursor: 'pointer',
+                        color: isSelected ? '#60A5FA' : '#F1F5F9',
+                        fontWeight: isSelected ? 700 : 500,
+                        fontSize: '0.9rem'
+                      }}
+                    >
+                      <input
+                        type="radio"
+                        name={`exam_ans_${activeQuestion.id}`}
+                        checked={isSelected}
+                        onChange={() => setQuestionAnswers((prev) => ({ ...prev, [activeQuestion.id]: optIdx }))}
+                        style={{ cursor: 'pointer' }}
+                      />
+                      <span>{String.fromCharCode(65 + optIdx)}: {opt}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+          ) : (activeQuestion?.type === 'paragraph' || activeQuestion?.type === 'descriptive') ? (
+            <div style={{ flex: 1, padding: '1.25rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+              <div style={{ fontSize: '1rem', fontWeight: 700, color: '#F8FAFC', lineHeight: 1.5 }}>
+                {activeQuestion.prompt}
+              </div>
+              {activeQuestion.guidelines && (
+                <div style={{ fontSize: '0.8rem', color: '#F59E0B', fontStyle: 'italic' }}>
+                  Rubric: {activeQuestion.guidelines}
+                </div>
+              )}
+              <textarea
+                rows={10}
+                value={questionAnswers[activeQuestion.id] || ''}
+                onChange={(e) => setQuestionAnswers((prev) => ({ ...prev, [activeQuestion.id]: e.target.value }))}
+                placeholder="Type your detailed answer and explanation here..."
+                style={{
+                  width: '100%',
+                  flex: 1,
+                  borderRadius: '10px',
+                  padding: '0.85rem',
+                  fontSize: '0.88rem',
+                  lineHeight: 1.6,
+                  backgroundColor: '#020617',
+                  color: '#F8FAFC',
+                  border: '1px solid #334155',
+                  resize: 'none'
+                }}
+              />
+            </div>
+          ) : (
+            <div style={{ flex: 1, position: 'relative' }}>
+              <Editor
+                height="100%"
+                language={selectedLangId === 'c' || selectedLangId === 'cpp' ? 'cpp' : selectedLangId}
+                theme="vs-dark"
+                value={code}
+                onChange={(value) => setCode(value || '')}
+                options={{
+                  minimap: { enabled: false },
+                  fontSize: 14,
+                  fontFamily: 'var(--font-mono)',
+                  scrollBeyondLastLine: false,
+                  lineNumbers: 'on',
+                  renderWhitespace: 'selection',
+                  tabSize: 4,
+                  readOnly: isTimeExpired
+                }}
+              />
+            </div>
+          )}
         </div>
 
         {/* RIGHT: PROCTORED TEST OUTPUT TERMINAL */}

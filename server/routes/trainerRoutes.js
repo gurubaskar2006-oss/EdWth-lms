@@ -1111,7 +1111,28 @@ router.put('/subjects/:courseId/current-topic', async (req, res) => {
  */
 router.get('/courses', async (req, res) => {
   try {
-    const courses = await Course.find({ tenantId: req.tenantId }).lean();
+    const trainerOid = (req.user._id && mongoose.Types.ObjectId.isValid(req.user._id))
+      ? new mongoose.Types.ObjectId(req.user._id)
+      : req.user._id;
+
+    const userBatches = req.user.assignedBatches || (req.user.batchId ? [req.user.batchId] : []);
+    const batchOids = userBatches.filter(b => mongoose.Types.ObjectId.isValid(b)).map(b => new mongoose.Types.ObjectId(b));
+
+    const query = {
+      tenantId: req.tenantId,
+      $or: [
+        { teacherId: trainerOid },
+        { 'assignedTrainer._id': trainerOid },
+        { 'assignedTrainer.email': req.user.email },
+        ...(batchOids.length > 0 ? [{ batchId: { $in: batchOids } }] : [])
+      ]
+    };
+
+    let courses = await Course.find(query).lean();
+    if (!courses || courses.length === 0) {
+      // Fallback only if no courses are specifically assigned to this educator
+      courses = await Course.find({ tenantId: req.tenantId }).lean();
+    }
     res.json({ success: true, courses, subjects: courses });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -1295,7 +1316,7 @@ router.get('/homework', async (req, res) => {
  */
 router.post('/homework', async (req, res) => {
   try {
-    const { title, subject, topic, dueDate, points, description, batchId, batchName, requirements } = req.body;
+    const { title, subject, topic, dueDate, points, description, batchId, batchName, requirements, questions } = req.body;
     if (!title || !title.trim()) {
       return res.status(400).json({ success: false, message: 'Homework title is required' });
     }
@@ -1318,6 +1339,7 @@ router.post('/homework', async (req, res) => {
       points: Number(points) || 20,
       description: description || 'Complete practice exercises and submit implementation.',
       requirements: Array.isArray(requirements) ? requirements : [],
+      questions: Array.isArray(questions) ? questions : [],
       status: 'pending'
     });
 

@@ -5,10 +5,17 @@ import { X, BookOpen, Send, CheckCircle2, Paperclip, AlertCircle } from 'lucide-
 export const SchoolHomeworkSubmitModal = ({ homework, isOpen, onClose }) => {
   const { submitSchoolHomework } = useLMS();
   const [submissionText, setSubmissionText] = useState('');
+  const [questionAnswers, setQuestionAnswers] = useState({});
   const [attachedFiles, setAttachedFiles] = useState([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   if (!isOpen || !homework) return null;
+
+  const hasQuestions = Array.isArray(homework.questions) && homework.questions.length > 0;
+
+  const handleAnswerChange = (qId, val) => {
+    setQuestionAnswers((prev) => ({ ...prev, [qId]: val }));
+  };
 
   const handleFileAttach = (e) => {
     const files = Array.from(e.target.files || []);
@@ -19,9 +26,30 @@ export const SchoolHomeworkSubmitModal = ({ homework, isOpen, onClose }) => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!submissionText.trim()) return;
+    let finalSubmission = submissionText.trim();
+    if (hasQuestions) {
+      const compiled = homework.questions.map((q, idx) => {
+        const val = questionAnswers[q.id];
+        let answerDisplay = '(Unanswered)';
+        if (q.type === 'mcq') {
+          if (val !== undefined && val !== null && q.options && q.options[val] !== undefined) {
+            answerDisplay = `${String.fromCharCode(65 + Number(val))}) ${q.options[val]}`;
+          } else {
+            answerDisplay = String(val || '(Unanswered)');
+          }
+        } else {
+          answerDisplay = val ? String(val).trim() : '(Unanswered)';
+        }
+        return `### Question ${idx + 1} [${q.type.toUpperCase()}] (${q.marks || 5} Marks): ${q.title || ''}\n${q.prompt || ''}\nAnswer:\n${answerDisplay}\n`;
+      }).join('\n----------------------------------------\n\n');
+
+      finalSubmission = finalSubmission ? `${compiled}\n\nAdditional Notes:\n${finalSubmission}` : compiled;
+    }
+
+    if (!finalSubmission.trim()) return;
+
     setIsSubmitting(true);
-    const success = await submitSchoolHomework(homework.id || homework._id, submissionText);
+    const success = await submitSchoolHomework(homework.id || homework._id, finalSubmission);
     setIsSubmitting(false);
     if (success) {
       onClose();
@@ -33,7 +61,9 @@ export const SchoolHomeworkSubmitModal = ({ homework, isOpen, onClose }) => {
       <div
         className="modal-content"
         style={{
-          maxWidth: '560px',
+          maxWidth: hasQuestions ? '740px' : '560px',
+          maxHeight: '90vh',
+          overflowY: 'auto',
           padding: '1.75rem',
           borderRadius: '18px',
           backgroundColor: 'var(--bg-card)',
@@ -104,25 +134,195 @@ export const SchoolHomeworkSubmitModal = ({ homework, isOpen, onClose }) => {
         </div>
 
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-          <div>
-            <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '0.4rem' }}>
-              Your Answers / Homework Notes
-            </label>
-            <textarea
-              rows={5}
-              value={submissionText}
-              onChange={(e) => setSubmissionText(e.target.value)}
-              placeholder="Type your answers, solutions, or explanations here..."
-              required
-              style={{
-                width: '100%',
-                borderRadius: '10px',
-                padding: '0.75rem',
-                fontSize: '0.88rem',
-                resize: 'vertical'
-              }}
-            />
-          </div>
+          {/* If structured questions exist, render each interactive question */}
+          {hasQuestions ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              <div style={{ fontSize: '0.86rem', fontWeight: 800, color: 'var(--text-primary)', borderBottom: '1px solid var(--border-default)', paddingBottom: '0.4rem' }}>
+                Assignment Questions ({homework.questions.length})
+              </div>
+
+              {homework.questions.map((q, idx) => (
+                <div
+                  key={q.id || idx}
+                  style={{
+                    padding: '0.9rem',
+                    borderRadius: '12px',
+                    backgroundColor: 'var(--bg-secondary)',
+                    border: '1px solid var(--border-default)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '0.6rem'
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <span
+                        style={{
+                          fontSize: '0.74rem',
+                          fontWeight: 800,
+                          padding: '2px 7px',
+                          borderRadius: '5px',
+                          textTransform: 'uppercase',
+                          backgroundColor:
+                            q.type === 'mcq'
+                              ? 'rgba(5, 150, 105, 0.15)'
+                              : q.type === 'coding'
+                              ? 'rgba(124, 58, 237, 0.15)'
+                              : 'rgba(217, 119, 6, 0.15)',
+                          color:
+                            q.type === 'mcq' ? '#059669' : q.type === 'coding' ? '#7C3AED' : '#D97706'
+                        }}
+                      >
+                        Q{idx + 1} · {q.type.toUpperCase()}
+                      </span>
+                      <strong style={{ fontSize: '0.88rem', color: 'var(--text-primary)' }}>
+                        {q.title || `Question ${idx + 1}`}
+                      </strong>
+                    </div>
+                    <span style={{ fontSize: '0.76rem', fontWeight: 700, color: 'var(--text-secondary)' }}>
+                      {q.marks || 5} Marks
+                    </span>
+                  </div>
+
+                  <p style={{ margin: 0, fontSize: '0.84rem', color: 'var(--text-primary)', lineHeight: 1.45 }}>
+                    {q.prompt}
+                  </p>
+
+                  {/* MCQ Option Selection */}
+                  {q.type === 'mcq' && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', marginTop: '0.25rem' }}>
+                      {(q.options || []).map((opt, optIdx) => {
+                        const isSelected = Number(questionAnswers[q.id]) === optIdx;
+                        return (
+                          <label
+                            key={optIdx}
+                            onClick={() => handleAnswerChange(q.id, optIdx)}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '0.6rem',
+                              padding: '0.5rem 0.75rem',
+                              borderRadius: '8px',
+                              border: isSelected ? '1.5px solid #2563EB' : '1px solid var(--border-default)',
+                              backgroundColor: isSelected ? 'rgba(37, 99, 235, 0.08)' : 'var(--bg-card)',
+                              cursor: 'pointer',
+                              fontSize: '0.84rem',
+                              color: isSelected ? '#2563EB' : 'var(--text-primary)',
+                              fontWeight: isSelected ? 700 : 500
+                            }}
+                          >
+                            <input
+                              type="radio"
+                              name={`answer_${q.id}`}
+                              checked={isSelected}
+                              onChange={() => handleAnswerChange(q.id, optIdx)}
+                              style={{ cursor: 'pointer' }}
+                            />
+                            <span>{String.fromCharCode(65 + optIdx)}: {opt}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {/* Paragraph Textarea */}
+                  {(q.type === 'paragraph' || q.type === 'descriptive') && (
+                    <div>
+                      {q.guidelines && (
+                        <div style={{ fontSize: '0.74rem', color: '#D97706', marginBottom: '0.3rem', fontStyle: 'italic' }}>
+                          Rubric: {q.guidelines}
+                        </div>
+                      )}
+                      <textarea
+                        rows={3}
+                        value={questionAnswers[q.id] || ''}
+                        onChange={(e) => handleAnswerChange(q.id, e.target.value)}
+                        placeholder="Write your explanation / descriptive answer here..."
+                        style={{
+                          width: '100%',
+                          borderRadius: '8px',
+                          padding: '0.5rem 0.65rem',
+                          fontSize: '0.84rem',
+                          backgroundColor: 'var(--bg-card)',
+                          color: 'var(--text-primary)',
+                          border: '1px solid var(--border-default)',
+                          resize: 'vertical'
+                        }}
+                      />
+                    </div>
+                  )}
+
+                  {/* Coding Solution Area */}
+                  {q.type === 'coding' && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                      <span style={{ fontSize: '0.74rem', fontWeight: 700, color: 'var(--text-secondary)' }}>
+                        Code Solution ({q.language || 'python'}):
+                      </span>
+                      <textarea
+                        rows={4}
+                        value={questionAnswers[q.id] !== undefined ? questionAnswers[q.id] : (q.starterCode || '')}
+                        onChange={(e) => handleAnswerChange(q.id, e.target.value)}
+                        placeholder="Write your code implementation..."
+                        style={{
+                          width: '100%',
+                          borderRadius: '8px',
+                          padding: '0.5rem 0.65rem',
+                          fontSize: '0.82rem',
+                          fontFamily: 'var(--font-mono, monospace)',
+                          backgroundColor: '#0F172A',
+                          color: '#F8FAFC',
+                          border: '1px solid var(--border-default)',
+                          resize: 'vertical'
+                        }}
+                      />
+                    </div>
+                  )}
+                </div>
+              ))}
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '0.4rem' }}>
+                  Additional Notes / Comments (Optional)
+                </label>
+                <textarea
+                  rows={2}
+                  value={submissionText}
+                  onChange={(e) => setSubmissionText(e.target.value)}
+                  placeholder="Optional final comments or notes to the teacher..."
+                  style={{
+                    width: '100%',
+                    borderRadius: '10px',
+                    padding: '0.65rem',
+                    fontSize: '0.86rem',
+                    resize: 'vertical',
+                    backgroundColor: 'var(--bg-secondary)',
+                    color: 'var(--text-primary)',
+                    border: '1px solid var(--border-default)'
+                  }}
+                />
+              </div>
+            </div>
+          ) : (
+            <div>
+              <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '0.4rem' }}>
+                Your Answers / Homework Notes
+              </label>
+              <textarea
+                rows={5}
+                value={submissionText}
+                onChange={(e) => setSubmissionText(e.target.value)}
+                placeholder="Type your answers, solutions, or explanations here..."
+                required
+                style={{
+                  width: '100%',
+                  borderRadius: '10px',
+                  padding: '0.75rem',
+                  fontSize: '0.88rem',
+                  resize: 'vertical'
+                }}
+              />
+            </div>
+          )}
 
           {/* Attached Files List */}
           {attachedFiles.length > 0 && (

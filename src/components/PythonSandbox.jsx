@@ -61,6 +61,9 @@ export const PythonSandbox = () => {
   // Execution & Output State
   const [outputTab, setOutputTab] = useState('output'); // 'output' | 'stdin' | 'errors' | 'details'
   const [stdinInput, setStdinInput] = useState('');
+  const [interactiveInputVal, setInteractiveInputVal] = useState('');
+  const [isWaitingForInput, setIsWaitingForInput] = useState(false);
+  const [inputPromptMessage, setInputPromptMessage] = useState('');
   const [stdout, setStdout] = useState('');
   const [stderr, setStderr] = useState('');
   const [rawOutput, setRawOutput] = useState('');
@@ -105,60 +108,9 @@ export const PythonSandbox = () => {
     addToast('Code Copied', 'Clipboard updated', 'emerald');
   };
 
-  // Interactively prompt user for program input if code requires input() or cin and stdin is empty
-  const requestUserInputIfNeeded = useCallback((lang, codeText, existingStdin) => {
-    if (existingStdin && existingStdin.trim()) {
-      return existingStdin;
-    }
-    const l = (lang || '').toLowerCase();
-    const isPy = l.includes('py');
-    const isCpp = l.includes('c++') || l.includes('cpp') || l === 'c';
-
-    if (isPy && /\binput\s*\(/.test(codeText)) {
-      const regex = /input\s*\(\s*(['"`])(.*?)\1\s*\)/g;
-      const prompts = [];
-      let match;
-      while ((match = regex.exec(codeText)) !== null) {
-        prompts.push(match[2]);
-      }
-      if (prompts.length > 0) {
-        const answers = [];
-        for (let i = 0; i < prompts.length; i++) {
-          const ans = window.prompt(`Program Input (${i + 1} of ${prompts.length}):\n${prompts[i]}`);
-          if (ans === null) return null; // Cancelled
-          answers.push(ans);
-        }
-        return answers.join('\n') + '\n';
-      } else {
-        const ans = window.prompt('Your Python program requires user input via input().\nEnter your input value(s), separated by newlines:');
-        return ans !== null ? (ans.trim() + '\n') : null;
-      }
-    }
-
-    if (isCpp && /\b(cin\s*>>|scanf\s*\(|getline\s*\()/i.test(codeText)) {
-      const ans = window.prompt('Your C++ program reads standard input (cin / scanf).\nEnter input value(s) separated by spaces or newlines:');
-      return ans !== null ? (ans.trim() + '\n') : null;
-    }
-
-    return existingStdin || '';
-  }, []);
-
-  // Run Code via backend execution queue & Piston runner
-  const handleRunCode = useCallback(async () => {
-    if (isRunning) return;
-
-    let currentStdin = stdinInput;
-    if (!currentStdin || !currentStdin.trim()) {
-      const prompted = requestUserInputIfNeeded(selectedLangId, code, currentStdin);
-      if (prompted === null) {
-        return; // Cancelled
-      }
-      if (prompted) {
-        currentStdin = prompted;
-        setStdinInput(prompted);
-      }
-    }
-
+  // Execute code with specific input payload
+  const executeWithInput = useCallback(async (inputPayload) => {
+    setIsWaitingForInput(false);
     setIsRunning(true);
     setExecutionState('RUNNING');
     setOutputTab('output');
@@ -170,7 +122,7 @@ export const PythonSandbox = () => {
 
     try {
       const { apiService } = await import('../services/apiService');
-      const response = await apiService.executeCode(selectedLangId, code, currentStdin);
+      const response = await apiService.executeCode(selectedLangId, code, inputPayload || '');
       const durationMs = Math.round(performance.now() - startTime);
 
       if (!response.success) {
@@ -202,43 +154,80 @@ export const PythonSandbox = () => {
       setExecutionState(state);
       setStdout(outText);
       setStderr(errText);
-      setRawOutput(outText || errText || `(Program completed with exit code ${exitCode} with zero output)`);
+      setRawOutput(outText || (exitCode === 0 ? '[Execution completed with exit code 0]' : `[Process terminated with exit code ${exitCode}]`));
 
       setExecutionMetrics({
         status: state,
         code: exitCode,
         durationMs,
         language: response.data?.language || currentLanguage.name,
-        version: response.data?.version || currentLanguage.version || 'Isolated Runner',
-        signal: run.signal || null,
-        byteCount: (outText + errText).length
+        version: response.data?.version || currentLanguage.version || 'Container',
+        byteCount: outText.length
       });
 
-      // If execution produced errors only, switch to Errors tab for developer ergonomics
       if (exitCode !== 0 && errText && !outText) {
         setOutputTab('errors');
       } else {
         setOutputTab('output');
       }
+
+      if (exitCode === 0) {
+        addToast('Execution Completed', 'Code ran cleanly with Exit Code 0.', 'emerald');
+      } else {
+        addToast('Execution Halted', `Program exited with code ${exitCode}. Check Errors tab.`, 'rose');
+      }
     } catch (e) {
-      console.error(e);
       const durationMs = Math.round(performance.now() - startTime);
       setExecutionState('FAILED');
-      setStderr(e.message || 'Network connection failed.');
-      setRawOutput(`[Connection Error]\nCould not connect to Lumina execution service.`);
+      setStderr(e.message || 'Execution failed.');
+      setRawOutput(`[EXECUTION_FAILED]\n${e.message}`);
       setExecutionMetrics({
         status: 'FAILED',
         code: -1,
         durationMs,
         language: currentLanguage.name,
-        version: 'Offline',
+        version: currentLanguage.version || 'Container',
         byteCount: 0
       });
       setOutputTab('errors');
     } finally {
       setIsRunning(false);
     }
-  }, [isRunning, currentLanguage, selectedLangId, code]);
+  }, [selectedLangId, code, currentLanguage.name, currentLanguage.version, addToast]);
+
+  // Run Code via backend execution queue & Piston runner
+  const handleRunCode = useCallback(async () => {
+    if (isRunning) return;
+
+    const l = (selectedLangId || '').toLowerCase();
+    const isPy = l.includes('py');
+    const isCpp = l.includes('c++') || l.includes('cpp') || l === 'c';
+    const needsInput = (isPy && /\binput\s*\(/.test(code)) || (isCpp && /\b(cin\s*>>|scanf\s*\(|getline\s*\()/i.test(code));
+
+    if (needsInput && !stdinInput.trim()) {
+      let promptMsg = 'Program waiting for user input:';
+      if (isPy) {
+        const match = /input\s*\(\s*(['"`])(.*?)\1\s*\)/.exec(code);
+        if (match && match[2]) promptMsg = match[2];
+      }
+      setInputPromptMessage(promptMsg);
+      setIsWaitingForInput(true);
+      setOutputTab('output');
+      setRawOutput(promptMsg ? `${promptMsg} ` : '$ Program waiting for input (enter below)...\n');
+      return;
+    }
+
+    executeWithInput(stdinInput);
+  }, [isRunning, selectedLangId, code, stdinInput, executeWithInput]);
+
+  const handleTerminalInputSubmit = (val) => {
+    const inputVal = (val !== undefined ? val : interactiveInputVal).trim();
+    if (!inputVal) return;
+    const combined = stdinInput.trim() ? `${stdinInput.trim()}\n${inputVal}\n` : `${inputVal}\n`;
+    setStdinInput(combined);
+    setInteractiveInputVal('');
+    executeWithInput(combined);
+  };
 
   // Keyboard shortcut: Ctrl+Enter or Cmd+Enter to run
   useEffect(() => {
@@ -826,13 +815,77 @@ export const PythonSandbox = () => {
           >
             {/* TAB: OUTPUT */}
             {outputTab === 'output' && (
-              <div style={{ color: '#E2E8F0', whiteSpace: 'pre-wrap' }}>
-                {rawOutput ? (
-                  rawOutput
-                ) : (
-                  <span style={{ color: '#64748B' }}>
-                    $ Ready. Click 'Run Code' or press Ctrl+Enter to compile and run your program.
-                  </span>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
+                <div style={{ color: '#E2E8F0', whiteSpace: 'pre-wrap' }}>
+                  {rawOutput ? (
+                    rawOutput
+                  ) : (
+                    <span style={{ color: '#64748B' }}>
+                      $ Ready. Click 'Run Code' or press Ctrl+Enter to compile and run your program.
+                    </span>
+                  )}
+                </div>
+
+                {/* Interactive Terminal Input Prompt inside Output Panel */}
+                {isWaitingForInput && (
+                  <div style={{ marginTop: '0.5rem', padding: '0.75rem', borderRadius: '8px', backgroundColor: '#111827', border: '1px solid #38BDF8' }}>
+                    <div style={{ color: '#38BDF8', fontSize: '0.8rem', fontWeight: 600, marginBottom: '0.4rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                      <span>{inputPromptMessage || 'Program waiting for user input:'}</span>
+                    </div>
+                    <form
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        handleTerminalInputSubmit();
+                      }}
+                      style={{ display: 'flex', gap: '0.5rem' }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', flex: 1, backgroundColor: '#030712', borderRadius: '6px', border: '1px solid #374151', padding: '0 0.6rem' }}>
+                        <span style={{ color: '#10B981', fontWeight: 700, marginRight: '0.4rem' }}>❯</span>
+                        <input
+                          type="text"
+                          autoFocus
+                          value={interactiveInputVal}
+                          onChange={(e) => setInteractiveInputVal(e.target.value)}
+                          placeholder="Type input value here and press Enter (or separate multiple with space)..."
+                          style={{ width: '100%', padding: '0.45rem 0', background: 'transparent', border: 'none', color: '#F8FAFC', outline: 'none', fontFamily: 'var(--font-mono)', fontSize: '0.82rem' }}
+                        />
+                      </div>
+                      <button
+                        type="submit"
+                        className="btn-primary"
+                        style={{ padding: '0.4rem 1rem', fontSize: '0.78rem', backgroundColor: '#059669', borderColor: '#059669' }}
+                      >
+                        Send ↵
+                      </button>
+                    </form>
+                  </div>
+                )}
+
+                {/* Regular Terminal Input Row */}
+                {!isWaitingForInput && (
+                  <form
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      handleTerminalInputSubmit();
+                    }}
+                    style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginTop: '0.5rem', paddingTop: '0.5rem', borderTop: '1px solid #1F2937' }}
+                  >
+                    <span style={{ color: '#10B981', fontWeight: 700, fontSize: '0.85rem' }}>❯</span>
+                    <input
+                      type="text"
+                      value={interactiveInputVal}
+                      onChange={(e) => setInteractiveInputVal(e.target.value)}
+                      placeholder="Type program input (e.g. 10 20) and press Enter ↵..."
+                      style={{ flex: 1, backgroundColor: '#111827', border: '1px solid #374151', borderRadius: '6px', color: '#F1F5F9', padding: '0.35rem 0.6rem', fontSize: '0.78rem', fontFamily: 'var(--font-mono)', outline: 'none' }}
+                    />
+                    <button
+                      type="submit"
+                      className="btn-secondary"
+                      style={{ fontSize: '0.72rem', padding: '0.35rem 0.75rem', borderColor: '#4B5563' }}
+                    >
+                      Send Input ↵
+                    </button>
+                  </form>
                 )}
               </div>
             )}

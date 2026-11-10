@@ -107,6 +107,589 @@ const printTestRoster = (test) => {
   printWindow.document.close();
 };
 
+// ─── Interactive Question Paper Builder Component ──────────────────────────────
+export const QuestionPaperBuilder = ({ questions = [], setQuestions, defaultSubject = 'Python Programming' }) => {
+  const isCpp = defaultSubject.toLowerCase().includes('c++') || defaultSubject.toLowerCase().includes('cpp');
+  const isSql = defaultSubject.toLowerCase().includes('sql');
+  const defaultLang = isSql ? 'sql' : isCpp ? 'cpp' : 'python';
+
+  const addMcq = () => {
+    const q = {
+      id: 'q_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+      type: 'mcq',
+      title: `MCQ ${questions.length + 1}`,
+      prompt: '',
+      options: ['Option A', 'Option B', 'Option C', 'Option D'],
+      correctAnswer: 0,
+      marks: 5
+    };
+    setQuestions([...questions, q]);
+  };
+
+  const addParagraph = () => {
+    const q = {
+      id: 'q_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+      type: 'paragraph',
+      title: `Descriptive Question ${questions.length + 1}`,
+      prompt: '',
+      guidelines: '',
+      marks: 10
+    };
+    setQuestions([...questions, q]);
+  };
+
+  const addCoding = () => {
+    const starters = {
+      python: `# Python solution\ndef solve():\n    pass\n\nif __name__ == '__main__':\n    solve()\n`,
+      cpp: `// C++ solution\n#include <iostream>\nusing namespace std;\n\nint main() {\n    // Write solution here\n    return 0;\n}\n`,
+      sql: `-- SQL query solution\nSELECT * FROM students;\n`
+    };
+    const q = {
+      id: 'q_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+      type: 'coding',
+      title: `Coding Challenge ${questions.length + 1}`,
+      prompt: 'Write a program to solve the given problem statement.',
+      language: defaultLang,
+      starterCode: starters[defaultLang] || starters.python,
+      testCases: [
+        { id: 'tc_' + Date.now() + '_1', input: '5', expectedOutput: '25', isHidden: false, marks: 5 },
+        { id: 'tc_' + Date.now() + '_2', input: '10', expectedOutput: '100', isHidden: true, marks: 5 }
+      ],
+      marks: 10
+    };
+    setQuestions([...questions, q]);
+  };
+
+  const loadPresetSamples = () => {
+    const preset = [
+      {
+        id: 'q_sample_mcq_' + Date.now(),
+        type: 'mcq',
+        title: 'Core Syntax Check',
+        prompt: isCpp
+          ? 'What is the standard stream used for console output in C++?'
+          : 'Which built-in function returns the length of a string or list in Python?',
+        options: isCpp
+          ? ['cout', 'cin', 'print', 'printf']
+          : ['len()', 'length()', 'count()', 'size()'],
+        correctAnswer: 0,
+        marks: 5
+      },
+      {
+        id: 'q_sample_para_' + Date.now(),
+        type: 'paragraph',
+        title: 'Algorithmic & Conceptual Explanation',
+        prompt: isCpp
+          ? 'Explain the differences between stack and heap memory allocation in C++, including when to use pointers and delete.'
+          : 'Explain the difference between shallow copy and deep copy in Python with code examples.',
+        guidelines: 'Define both concepts, state memory implications, and illustrate with code snippet.',
+        marks: 10
+      },
+      {
+        id: 'q_sample_code_' + Date.now(),
+        type: 'coding',
+        title: 'Problem Solving & Implementation',
+        prompt: isCpp
+          ? 'Read an integer N from standard input. Compute and print the sum of all odd numbers from 1 to N.'
+          : 'Read an integer N from standard input. Compute and print the sum of all odd numbers from 1 to N.',
+        language: defaultLang,
+        starterCode: isCpp
+          ? '#include <iostream>\nusing namespace std;\n\nint main() {\n    int n;\n    if (cin >> n) {\n        // Your logic\n    }\n    return 0;\n}\n'
+          : 'import sys\n\ndef main():\n    lines = sys.stdin.read().split()\n    if not lines: return\n    n = int(lines[0])\n    # Your logic\n\nif __name__ == "__main__":\n    main()\n',
+        testCases: [
+          { id: 'tc_p1', input: '5', expectedOutput: '9', isHidden: false, marks: 5 },
+          { id: 'tc_p2', input: '10', expectedOutput: '25', isHidden: false, marks: 5 }
+        ],
+        marks: 10
+      }
+    ];
+    setQuestions(preset);
+  };
+
+  const removeQuestion = (idx) => {
+    setQuestions(questions.filter((_, i) => i !== idx));
+  };
+
+  const updateQuestion = (idx, field, val) => {
+    const arr = [...questions];
+    arr[idx] = { ...arr[idx], [field]: val };
+    setQuestions(arr);
+  };
+
+  const updateOption = (qIdx, optIdx, val) => {
+    const arr = [...questions];
+    const opts = [...(arr[qIdx].options || ['', '', '', ''])];
+    opts[optIdx] = val;
+    arr[qIdx].options = opts;
+    setQuestions(arr);
+  };
+
+  const addTestCase = (qIdx) => {
+    const arr = [...questions];
+    const tcs = arr[qIdx].testCases || [];
+    arr[qIdx].testCases = [
+      ...tcs,
+      { id: 'tc_' + Date.now() + '_' + Math.random().toString(36).substring(2, 5), input: '', expectedOutput: '', isHidden: false, marks: 5 }
+    ];
+    setQuestions(arr);
+  };
+
+  const removeTestCase = (qIdx, tcIdx) => {
+    const arr = [...questions];
+    arr[qIdx].testCases = (arr[qIdx].testCases || []).filter((_, i) => i !== tcIdx);
+    setQuestions(arr);
+  };
+
+  const updateTestCase = (qIdx, tcIdx, field, val) => {
+    const arr = [...questions];
+    const tcs = [...(arr[qIdx].testCases || [])];
+    tcs[tcIdx] = { ...tcs[tcIdx], [field]: val };
+    arr[qIdx].testCases = tcs;
+    setQuestions(arr);
+  };
+
+  const totalCalculatedMarks = questions.reduce((sum, q) => sum + (Number(q.marks) || 0), 0);
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem', marginTop: '0.5rem' }}>
+      {/* Header Bar */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          flexWrap: 'wrap',
+          gap: '0.5rem',
+          padding: '0.65rem 0.9rem',
+          borderRadius: '10px',
+          backgroundColor: 'rgba(37, 99, 235, 0.08)',
+          border: '1px solid rgba(37, 99, 235, 0.2)'
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <ListCheck size={18} color="#2563EB" />
+          <span style={{ fontSize: '0.86rem', fontWeight: 800, color: 'var(--text-primary)' }}>
+            Question Paper & Challenge Builder
+          </span>
+          <span
+            style={{
+              fontSize: '0.74rem',
+              fontWeight: 700,
+              padding: '2px 8px',
+              borderRadius: '6px',
+              backgroundColor: '#2563EB',
+              color: '#FFFFFF'
+            }}
+          >
+            {questions.length} Question{questions.length !== 1 ? 's' : ''} · {totalCalculatedMarks} Marks
+          </span>
+        </div>
+
+        <button
+          type="button"
+          onClick={loadPresetSamples}
+          style={{
+            background: 'none',
+            border: 'none',
+            color: '#2563EB',
+            fontSize: '0.78rem',
+            fontWeight: 700,
+            cursor: 'pointer',
+            textDecoration: 'underline'
+          }}
+        >
+          ⚡ Load Sample Template (MCQ + Para + Code)
+        </button>
+      </div>
+
+      {/* Action Buttons */}
+      <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+        <button
+          type="button"
+          onClick={addMcq}
+          className="btn-secondary"
+          style={{
+            fontSize: '0.78rem',
+            padding: '0.4rem 0.75rem',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '5px',
+            backgroundColor: 'var(--bg-secondary)',
+            borderColor: 'var(--border-default)'
+          }}
+        >
+          <CheckSquare size={14} color="#059669" />
+          <span>+ Add MCQ Question</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={addParagraph}
+          className="btn-secondary"
+          style={{
+            fontSize: '0.78rem',
+            padding: '0.4rem 0.75rem',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '5px',
+            backgroundColor: 'var(--bg-secondary)',
+            borderColor: 'var(--border-default)'
+          }}
+        >
+          <FileText size={14} color="#D97706" />
+          <span>+ Add Paragraph Question</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={addCoding}
+          className="btn-secondary"
+          style={{
+            fontSize: '0.78rem',
+            padding: '0.4rem 0.75rem',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '5px',
+            backgroundColor: 'var(--bg-secondary)',
+            borderColor: 'var(--border-default)'
+          }}
+        >
+          <FileCode size={14} color="#7C3AED" />
+          <span>+ Add Coding Question</span>
+        </button>
+      </div>
+
+      {/* Questions List */}
+      {questions.length === 0 ? (
+        <div
+          style={{
+            padding: '1.25rem',
+            textAlign: 'center',
+            borderRadius: '10px',
+            border: '1px dashed var(--border-default)',
+            backgroundColor: 'var(--bg-secondary)',
+            color: 'var(--text-secondary)',
+            fontSize: '0.82rem'
+          }}
+        >
+          No individual questions added yet. Click an option above or load sample questions to construct Multiple Choice, Paragraph, or Coding tasks.
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+          {questions.map((q, qIdx) => (
+            <div
+              key={q.id || qIdx}
+              style={{
+                borderRadius: '12px',
+                border: '1px solid var(--border-default)',
+                backgroundColor: 'var(--bg-secondary)',
+                padding: '0.85rem',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '0.65rem'
+              }}
+            >
+              {/* Card Header */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <span
+                    style={{
+                      fontSize: '0.74rem',
+                      fontWeight: 800,
+                      padding: '2px 7px',
+                      borderRadius: '5px',
+                      textTransform: 'uppercase',
+                      backgroundColor:
+                        q.type === 'mcq'
+                          ? 'rgba(5, 150, 105, 0.15)'
+                          : q.type === 'coding'
+                          ? 'rgba(124, 58, 237, 0.15)'
+                          : 'rgba(217, 119, 6, 0.15)',
+                      color:
+                        q.type === 'mcq' ? '#059669' : q.type === 'coding' ? '#7C3AED' : '#D97706'
+                    }}
+                  >
+                    Q{qIdx + 1} · {q.type.toUpperCase()}
+                  </span>
+                  <input
+                    type="text"
+                    value={q.title || ''}
+                    onChange={(e) => updateQuestion(qIdx, 'title', e.target.value)}
+                    placeholder="Question Title / Topic"
+                    style={{
+                      padding: '0.3rem 0.5rem',
+                      fontSize: '0.82rem',
+                      borderRadius: '6px',
+                      border: '1px solid var(--border-default)',
+                      backgroundColor: 'var(--bg-card)',
+                      color: 'var(--text-primary)',
+                      width: '240px'
+                    }}
+                  />
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    <span style={{ fontSize: '0.76rem', color: 'var(--text-secondary)', fontWeight: 600 }}>Marks:</span>
+                    <input
+                      type="number"
+                      value={q.marks || 5}
+                      onChange={(e) => updateQuestion(qIdx, 'marks', Number(e.target.value))}
+                      min="1"
+                      max="100"
+                      style={{
+                        width: '55px',
+                        padding: '0.25rem 0.4rem',
+                        fontSize: '0.8rem',
+                        borderRadius: '6px',
+                        border: '1px solid var(--border-default)',
+                        backgroundColor: 'var(--bg-card)',
+                        color: 'var(--text-primary)',
+                        textAlign: 'center'
+                      }}
+                    />
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => removeQuestion(qIdx)}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: '#EF4444',
+                      cursor: 'pointer',
+                      padding: '4px'
+                    }}
+                    title="Delete Question"
+                  >
+                    <Trash2 size={15} />
+                  </button>
+                </div>
+              </div>
+
+              {/* Question Statement / Prompt */}
+              <div>
+                <label style={{ display: 'block', fontSize: '0.76rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '3px' }}>
+                  Question Prompt / Problem Statement:
+                </label>
+                <textarea
+                  rows={2}
+                  value={q.prompt || ''}
+                  onChange={(e) => updateQuestion(qIdx, 'prompt', e.target.value)}
+                  placeholder="Enter the full question statement or instructions here..."
+                  style={{
+                    width: '100%',
+                    padding: '0.45rem',
+                    fontSize: '0.82rem',
+                    borderRadius: '6px',
+                    border: '1px solid var(--border-default)',
+                    backgroundColor: 'var(--bg-card)',
+                    color: 'var(--text-primary)',
+                    resize: 'vertical'
+                  }}
+                />
+              </div>
+
+              {/* MCQ Options */}
+              {q.type === 'mcq' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                  <label style={{ fontSize: '0.74rem', fontWeight: 700, color: 'var(--text-secondary)' }}>
+                    Multiple Choices (Select radio button for Correct Answer):
+                  </label>
+                  {(q.options || ['Option A', 'Option B', 'Option C', 'Option D']).map((opt, optIdx) => (
+                    <div key={optIdx} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <input
+                        type="radio"
+                        name={`correct_ans_${q.id || qIdx}`}
+                        checked={Number(q.correctAnswer) === optIdx}
+                        onChange={() => updateQuestion(qIdx, 'correctAnswer', optIdx)}
+                        style={{ cursor: 'pointer' }}
+                        title="Mark as correct answer"
+                      />
+                      <span style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-secondary)', minWidth: '18px' }}>
+                        {String.fromCharCode(65 + optIdx)}:
+                      </span>
+                      <input
+                        type="text"
+                        value={opt}
+                        onChange={(e) => updateOption(qIdx, optIdx, e.target.value)}
+                        placeholder={`Option ${String.fromCharCode(65 + optIdx)}`}
+                        style={{
+                          flex: 1,
+                          padding: '0.35rem 0.5rem',
+                          fontSize: '0.8rem',
+                          borderRadius: '6px',
+                          border: '1px solid var(--border-default)',
+                          backgroundColor: 'var(--bg-card)',
+                          color: 'var(--text-primary)'
+                        }}
+                      />
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Paragraph Guidelines */}
+              {(q.type === 'paragraph' || q.type === 'descriptive') && (
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.74rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '3px' }}>
+                    Evaluation Rubric / Guidelines for Student:
+                  </label>
+                  <input
+                    type="text"
+                    value={q.guidelines || ''}
+                    onChange={(e) => updateQuestion(qIdx, 'guidelines', e.target.value)}
+                    placeholder="e.g. Expected length: 150-200 words. Must address memory overhead and edge cases."
+                    style={{
+                      width: '100%',
+                      padding: '0.35rem 0.5rem',
+                      fontSize: '0.8rem',
+                      borderRadius: '6px',
+                      border: '1px solid var(--border-default)',
+                      backgroundColor: 'var(--bg-card)',
+                      color: 'var(--text-primary)'
+                    }}
+                  />
+                </div>
+              )}
+
+              {/* Coding Question Settings */}
+              {q.type === 'coding' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                      <span style={{ fontSize: '0.74rem', fontWeight: 700, color: 'var(--text-secondary)' }}>Language:</span>
+                      <select
+                        value={q.language || defaultLang}
+                        onChange={(e) => updateQuestion(qIdx, 'language', e.target.value)}
+                        style={{
+                          padding: '0.25rem 0.5rem',
+                          fontSize: '0.78rem',
+                          borderRadius: '6px',
+                          border: '1px solid var(--border-default)',
+                          backgroundColor: 'var(--bg-card)',
+                          color: 'var(--text-primary)'
+                        }}
+                      >
+                        <option value="python">Python</option>
+                        <option value="cpp">C++</option>
+                        <option value="sql">SQL</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.74rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '3px' }}>
+                      Starter Code Template:
+                    </label>
+                    <textarea
+                      rows={3}
+                      value={q.starterCode || ''}
+                      onChange={(e) => updateQuestion(qIdx, 'starterCode', e.target.value)}
+                      placeholder="# Boilerplate starter code for students..."
+                      style={{
+                        width: '100%',
+                        fontFamily: 'var(--font-mono, monospace)',
+                        fontSize: '0.78rem',
+                        padding: '0.4rem',
+                        borderRadius: '6px',
+                        border: '1px solid var(--border-default)',
+                        backgroundColor: 'var(--bg-card)',
+                        color: 'var(--text-primary)',
+                        resize: 'vertical'
+                      }}
+                    />
+                  </div>
+
+                  {/* Test Cases */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <span style={{ fontSize: '0.74rem', fontWeight: 700, color: 'var(--text-secondary)' }}>
+                        Automated Test Cases:
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => addTestCase(qIdx)}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          color: '#7C3AED',
+                          fontSize: '0.74rem',
+                          fontWeight: 700,
+                          cursor: 'pointer'
+                        }}
+                      >
+                        + Add Test Case
+                      </button>
+                    </div>
+
+                    {(q.testCases || []).map((tc, tcIdx) => (
+                      <div
+                        key={tc.id || tcIdx}
+                        style={{
+                          display: 'grid',
+                          gridTemplateColumns: '1fr 1fr auto',
+                          gap: '0.4rem',
+                          alignItems: 'center'
+                        }}
+                      >
+                        <input
+                          type="text"
+                          value={tc.input || ''}
+                          onChange={(e) => updateTestCase(qIdx, tcIdx, 'input', e.target.value)}
+                          placeholder="Input (STDIN)"
+                          style={{
+                            padding: '0.3rem 0.5rem',
+                            fontSize: '0.76rem',
+                            fontFamily: 'var(--font-mono, monospace)',
+                            borderRadius: '5px',
+                            border: '1px solid var(--border-default)',
+                            backgroundColor: 'var(--bg-card)',
+                            color: 'var(--text-primary)'
+                          }}
+                        />
+                        <input
+                          type="text"
+                          value={tc.expectedOutput || ''}
+                          onChange={(e) => updateTestCase(qIdx, tcIdx, 'expectedOutput', e.target.value)}
+                          placeholder="Expected Output"
+                          style={{
+                            padding: '0.3rem 0.5rem',
+                            fontSize: '0.76rem',
+                            fontFamily: 'var(--font-mono, monospace)',
+                            borderRadius: '5px',
+                            border: '1px solid var(--border-default)',
+                            backgroundColor: 'var(--bg-card)',
+                            color: 'var(--text-primary)'
+                          }}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => removeTestCase(qIdx, tcIdx)}
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            color: '#EF4444',
+                            cursor: 'pointer',
+                            padding: '3px'
+                          }}
+                          title="Remove test case"
+                        >
+                          <X size={13} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
 // ─── 1. My Classes / My Batches View ──────────────────────────────────────────
 export const ClassesView = ({ onNavigateTab }) => {
   const { terms, institutionType, addToast } = useLMS();
@@ -1007,6 +1590,7 @@ export const AssignmentsManagementView = ({ onNavigateTab, onOpenGradingModal })
   const [newDueDate, setNewDueDate] = useState('');
   const [newPoints, setNewPoints] = useState(20);
   const [newDescription, setNewDescription] = useState('');
+  const [homeworkQuestions, setHomeworkQuestions] = useState([]);
 
   // Edit Homework state
   const [editingAssignment, setEditingAssignment] = useState(null);
@@ -1119,7 +1703,8 @@ export const AssignmentsManagementView = ({ onNavigateTab, onOpenGradingModal })
         batchName: targetClass?.name || targetClass?.className || undefined,
         dueDate: newDueDate || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
         points: Number(newPoints) || 20,
-        description: newDescription.trim() || 'Complete the exercises and submit code solution before deadline.'
+        description: newDescription.trim() || 'Complete the exercises and submit code solution before deadline.',
+        questions: homeworkQuestions
       });
       if (res?.success) {
         addToast('Homework Assigned', `Published "${newTitle}" to student dashboards.`, 'emerald');
@@ -1128,6 +1713,7 @@ export const AssignmentsManagementView = ({ onNavigateTab, onOpenGradingModal })
         setNewTopic('');
         setNewDescription('');
         setSelectedBatchId('');
+        setHomeworkQuestions([]);
         fetchHomework();
       } else {
         addToast('Notice', res?.message || 'Failed to publish homework.', 'amber');
@@ -1315,7 +1901,7 @@ export const AssignmentsManagementView = ({ onNavigateTab, onOpenGradingModal })
         >
           <div
             className="modal-content"
-            style={{ maxWidth: '540px', width: '100%', backgroundColor: 'var(--bg-card)', borderRadius: '18px', padding: '1.75rem', border: '1px solid var(--border-default)', boxShadow: '0 20px 45px rgba(0,0,0,0.2)' }}
+            style={{ maxWidth: '780px', width: '100%', maxHeight: '90vh', overflowY: 'auto', backgroundColor: 'var(--bg-card)', borderRadius: '18px', padding: '1.75rem', border: '1px solid var(--border-default)', boxShadow: '0 20px 45px rgba(0,0,0,0.2)' }}
             onClick={(e) => e.stopPropagation()}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
@@ -1419,16 +2005,23 @@ export const AssignmentsManagementView = ({ onNavigateTab, onOpenGradingModal })
 
               <div>
                 <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '0.35rem' }}>
-                  Instructions & Description
+                  Instructions & General Description
                 </label>
                 <textarea
-                  rows={3}
-                  placeholder="Provide detailed instructions or practice questions for students..."
+                  rows={2}
+                  placeholder="Provide instructions or overview for this assignment..."
                   value={newDescription}
                   onChange={(e) => setNewDescription(e.target.value)}
                   style={{ width: '100%', padding: '0.6rem', borderRadius: '8px', border: '1px solid var(--border-default)', backgroundColor: 'var(--bg-secondary)', color: 'var(--text-primary)', fontSize: '0.86rem', resize: 'vertical' }}
                 />
               </div>
+
+              {/* Detailed Question Paper Builder */}
+              <QuestionPaperBuilder
+                questions={homeworkQuestions}
+                setQuestions={setHomeworkQuestions}
+                defaultSubject={newSubject}
+              />
 
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '0.5rem' }}>
                 <button type="button" onClick={() => setShowCreateModal(false)} className="btn-secondary">
@@ -1612,6 +2205,7 @@ export const TestsManagementView = () => {
   const [testMarks, setTestMarks] = useState(100);
   const [testDuration, setTestDuration] = useState(45);
   const [scheduleBatchId, setScheduleBatchId] = useState('');
+  const [testQuestions, setTestQuestions] = useState([]);
 
   // Assign Modal State
   const [showAssignModal, setShowAssignModal] = useState(false);
@@ -1780,7 +2374,8 @@ export const TestsManagementView = () => {
       durationMinutes: Number(testDuration) || 45,
       isCodingExam: true,
       batchId: scheduleBatchId || undefined,
-      className: targetClass?.name || undefined
+      className: targetClass?.name || undefined,
+      questions: testQuestions
     };
 
     try {
@@ -1789,6 +2384,7 @@ export const TestsManagementView = () => {
         fetchTests();
         setShowScheduleModal(false);
         setTestTitle('');
+        setTestQuestions([]);
         addToast('Assessment Scheduled', `Published "${payload.title}" to student schedules.`, 'emerald');
       } else {
         addToast('Notice', res?.message || 'Failed to schedule assessment.', 'amber');
@@ -2542,7 +3138,7 @@ export const TestsManagementView = () => {
         >
           <div
             className="modal-content"
-            style={{ maxWidth: '540px', width: '100%', backgroundColor: 'var(--bg-card)', borderRadius: '18px', padding: '1.75rem', border: '1px solid var(--border-default)', boxShadow: '0 20px 45px rgba(0,0,0,0.2)' }}
+            style={{ maxWidth: '780px', width: '100%', maxHeight: '90vh', overflowY: 'auto', backgroundColor: 'var(--bg-card)', borderRadius: '18px', padding: '1.75rem', border: '1px solid var(--border-default)', boxShadow: '0 20px 45px rgba(0,0,0,0.2)' }}
             onClick={(e) => e.stopPropagation()}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
@@ -2658,6 +3254,13 @@ export const TestsManagementView = () => {
                   ))}
                 </select>
               </div>
+
+              {/* Detailed Question Paper Builder */}
+              <QuestionPaperBuilder
+                questions={testQuestions}
+                setQuestions={setTestQuestions}
+                defaultSubject={testSubject}
+              />
 
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '0.5rem' }}>
                 <button type="button" onClick={() => setShowScheduleModal(false)} className="btn-secondary">

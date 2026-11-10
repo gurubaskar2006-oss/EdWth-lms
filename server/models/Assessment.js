@@ -73,7 +73,7 @@ const assessmentSchema = new mongoose.Schema({
   },
   questions: [{
     id: { type: String, required: true },
-    type: { type: String, enum: ['mcq', 'coding', 'sql', 'descriptive'], default: 'coding' },
+    type: { type: String, enum: ['mcq', 'coding', 'sql', 'descriptive', 'paragraph'], default: 'coding' },
     title: { type: String, default: '' },
     prompt: { type: String, default: '' },
     language: { type: String, default: 'python' },
