@@ -795,13 +795,14 @@ export const apiService = {
     return res.success ? (res.temporaryPassword || res.newPassword) : null;
   },
   
-  async executeCode(language, code) {
+  async executeCode(language, code, stdin = '') {
     try {
       const res = await this._fetch(`${API_BASE_URL}/execute`, {
         method: 'POST',
         body: JSON.stringify({
           language,
-          files: [{ name: 'main', content: code }]
+          files: [{ name: 'main', content: code }],
+          stdin: typeof stdin === 'string' ? stdin : ''
         })
       });
       const data = await res.json().catch(() => null);
@@ -809,14 +810,14 @@ export const apiService = {
         return data;
       }
       // If backend runner is unavailable (503 / ISOLATED_RUNNER_UNAVAILABLE / offline notice), fall back to browser sandbox
-      const clientResult = await executeInBrowserSandbox(language, code);
+      const clientResult = await executeInBrowserSandbox(language, code, stdin);
       if (clientResult?.success) {
         return clientResult;
       }
       return data || { success: false, message: 'Execution runner unavailable.' };
     } catch (e) {
       console.warn('Backend execution unavailable, switching to browser sandbox:', e.message);
-      const clientResult = await executeInBrowserSandbox(language, code);
+      const clientResult = await executeInBrowserSandbox(language, code, stdin);
       if (clientResult?.success) {
         return clientResult;
       }

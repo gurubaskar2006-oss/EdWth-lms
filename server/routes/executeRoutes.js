@@ -15,7 +15,7 @@ router.get('/queue', verifyToken, (req, res) => {
 
 // POST /api/v1/execute - Code Lab Execution (Distributed Redis rate-limited)
 router.post('/', verifyToken, codeExecutionRateLimiter, async (req, res) => {
-  const { language, files, run_timeout } = req.body;
+  const { language, files, run_timeout, stdin } = req.body;
   
   if (!files || !Array.isArray(files) || files.length === 0) {
     return res.status(400).json({ success: false, message: 'No code files provided for execution.' });
@@ -26,6 +26,7 @@ router.post('/', verifyToken, codeExecutionRateLimiter, async (req, res) => {
     const result = await executionQueue.enqueue({
       language: language || 'python',
       files,
+      stdin: typeof stdin === 'string' ? stdin : '',
       runTimeout: timeout
     });
     

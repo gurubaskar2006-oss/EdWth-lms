@@ -15,6 +15,7 @@
  * 10. Backward compatibility: Legacy plaintext TOTP secrets verify successfully and are migrated transparently.
  */
 
+import { jest } from '@jest/globals';
 import request from 'supertest';
 import mongoose from 'mongoose';
 import speakeasy from 'speakeasy';
@@ -27,6 +28,8 @@ import { getJwtSecret, getMfaEncryptionKey, validateProductionEnv } from '../con
 import { decryptTotpSecret, encryptTotpSecret, isEncrypted } from '../utils/mfaCrypto.js';
 
 describe('EdWth LMS — MFA Secret Protection, Rotation & Encryption at Rest', () => {
+  jest.setTimeout(90000);
+
   let tenant;
   let enrolledUser;
   let enrolledToken;
@@ -38,7 +41,7 @@ describe('EdWth LMS — MFA Secret Protection, Rotation & Encryption at Rest', (
 
   beforeAll(async () => {
     let retries = 0;
-    while (mongoose.connection.readyState !== 1 && retries < 60) {
+    while (mongoose.connection.readyState !== 1 && retries < 120) {
       await new Promise((r) => setTimeout(r, 500));
       retries++;
     }
@@ -76,7 +79,7 @@ describe('EdWth LMS — MFA Secret Protection, Rotation & Encryption at Rest', (
       getJwtSecret(),
       { expiresIn: '1h' }
     );
-  });
+  }, 90000);
 
   afterAll(async () => {
     if (tenant?._id) await College.deleteMany({ _id: tenant._id });
