@@ -364,7 +364,9 @@ router.get('/students', async (req, res) => {
           { batchId: { $in: batchIds } },
           ...(classNames.length > 0 ? [
             { className: { $in: classNames } },
-            { batch: { $in: classNames } }
+            { batch: { $in: classNames } },
+            { standard: { $in: targetClasses } },
+            { 'schoolProfile.standard': { $in: targetClasses } }
           ] : [])
         ];
       } else {
@@ -545,12 +547,19 @@ router.get('/students', async (req, res) => {
         recommendedAction = 'Review proctored assessment logs and discuss academic integrity expectations.';
       }
 
+      const studentStandard = s.standard || s.schoolProfile?.standard || (s.className?.includes('12') ? 'Class 12' : (s.className?.includes('11') ? 'Class 11' : s.className)) || 'Class 11';
+      const studentSection = s.section || s.schoolProfile?.section || (s.className?.includes('-') ? s.className.split('-')[1] : 'A');
+      const formattedClassName = s.className && (s.className.includes('11') || s.className.includes('12')) ? s.className : `${studentStandard}-${studentSection}`;
+
       return {
         _id: s._id,
         studentId: s.studentId || 'STUDENT',
         name: s.name,
         email: s.email,
-        className: s.className || s.major || 'Unassigned',
+        className: formattedClassName,
+        standard: studentStandard,
+        section: studentSection,
+        batchId: s.batchId,
         attendanceRate, // Number or null
         attendancePercentage: attendanceRate,
         homeworkPending,

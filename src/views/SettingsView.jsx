@@ -380,7 +380,7 @@ export const SettingsView = ({ onCancel }) => {
                 <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', margin: '2px 0 0' }}>
                   {completionPercentage === 100
                     ? 'All required contact and emergency details are complete and verified.'
-                    : `${completedCount} of ${requiredFields.length} required fields completed.`}
+                    : `${completedCount} of 3 required contact fields completed.`}
                 </p>
               </div>
             </div>

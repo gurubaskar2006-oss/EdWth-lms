@@ -128,9 +128,10 @@ export const SchoolTeacherStudentsView = () => {
   const uniqueClasses = useMemo(() => {
     const set = new Set();
     students.forEach((s) => {
+      if (s.standard) set.add(s.standard);
       if (s.className) set.add(s.className);
     });
-    return Array.from(set);
+    return Array.from(set).sort();
   }, [students]);
 
   // Filtered student list
@@ -143,7 +144,11 @@ export const SchoolTeacherStudentsView = () => {
         s.email?.toLowerCase().includes(searchTerm.toLowerCase());
 
       const matchStatus = statusFilter === 'ALL' || s.status === statusFilter;
-      const matchClass = classFilter === 'ALL' || s.className === classFilter;
+      const matchClass =
+        classFilter === 'ALL' ||
+        s.className === classFilter ||
+        s.standard === classFilter ||
+        s.className?.startsWith(classFilter);
 
       return matchSearch && matchStatus && matchClass;
     });
@@ -396,7 +401,20 @@ export const SchoolTeacherStudentsView = () => {
                       </td>
 
                       <td style={{ padding: '0.9rem 1.25rem', color: 'var(--text-primary)', fontWeight: 600 }}>
-                        {st.className}
+                        <span
+                          style={{
+                            padding: '0.22rem 0.6rem',
+                            borderRadius: '6px',
+                            fontSize: '0.78rem',
+                            fontWeight: 700,
+                            display: 'inline-block',
+                            backgroundColor: (st.standard === 'Class 12' || st.className?.includes('12')) ? 'rgba(99, 102, 241, 0.12)' : 'rgba(16, 185, 129, 0.12)',
+                            color: (st.standard === 'Class 12' || st.className?.includes('12')) ? '#6366F1' : '#059669',
+                            border: `1px solid ${(st.standard === 'Class 12' || st.className?.includes('12')) ? 'rgba(99, 102, 241, 0.25)' : 'rgba(16, 185, 129, 0.25)'}`
+                          }}
+                        >
+                          {st.className || st.standard || 'Class 11'}
+                        </span>
                       </td>
 
                       <td style={{ padding: '0.9rem 1.25rem' }}>
