@@ -1315,6 +1315,8 @@ router.get('/homework', async (req, res) => {
         subject: hw.subject || hw.courseTitle || 'Technical Subject',
         topic: hw.topic || '',
         description: hw.description || '',
+        requirements: hw.requirements || [],
+        questions: hw.questions || [],
         batchId: hw.batchId?._id || hw.batchId || null,
         batchName: batchDisplayName,
         className: batchDisplayName,

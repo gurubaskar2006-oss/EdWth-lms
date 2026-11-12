@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useLMS } from '../context/LMSContext';
 import { usePageTitle } from '../hooks/usePageTitle';
 import { apiService } from '../services/apiService';
@@ -128,6 +128,112 @@ export const MultiSchoolManagementView = () => {
     selectedStudentIds: [],
     selectedTrainerIds: []
   });
+
+  // Section 3: Assignment Filters & Search State
+  const [assignStudentSchoolFilter, setAssignStudentSchoolFilter] = useState('target'); // 'target' | 'unassigned' | 'all'
+  const [assignStudentClassFilter, setAssignStudentClassFilter] = useState('match'); // 'match' | 'all' | 'Class 11' | 'Class 12'
+  const [assignStudentSearch, setAssignStudentSearch] = useState('');
+  const [assignTrainerFilter, setAssignTrainerFilter] = useState('all'); // 'all' | 'target' | 'unassigned'
+  const [assignTrainerSearch, setAssignTrainerSearch] = useState('');
+
+  // Lookup map of school ID -> School Name
+  const schoolMap = useMemo(() => {
+    const map = new Map();
+    (schools || []).forEach((s) => {
+      const sId = (s._id || s.id)?.toString();
+      if (sId) map.set(sId, s.name);
+    });
+    return map;
+  }, [schools]);
+
+  const getStudentTenantId = (st) => {
+    if (!st?.tenantId) return null;
+    return (typeof st.tenantId === 'object' ? (st.tenantId._id || st.tenantId.id) : st.tenantId)?.toString();
+  };
+
+  const getStudentClass = (st) => {
+    return st.standard || st.schoolProfile?.standard || (st.className && st.className.includes('11') ? 'Class 11' : (st.className && st.className.includes('12') ? 'Class 12' : st.className)) || '';
+  };
+
+  const targetSchoolStudentCount = useMemo(() => {
+    if (!selectedSchoolId) return 0;
+    return (allStudents || []).filter((st) => getStudentTenantId(st) === selectedSchoolId.toString()).length;
+  }, [allStudents, selectedSchoolId]);
+
+  const unassignedStudentCount = useMemo(() => {
+    return (allStudents || []).filter((st) => {
+      const tId = getStudentTenantId(st);
+      return !tId || !schoolMap.has(tId);
+    }).length;
+  }, [allStudents, schoolMap]);
+
+  const filteredStudentsForAssignment = useMemo(() => {
+    return (allStudents || []).filter((st) => {
+      const stTenantId = getStudentTenantId(st);
+      const isTarget = Boolean(stTenantId && selectedSchoolId && stTenantId === selectedSchoolId.toString());
+      const isUnassigned = !stTenantId || !schoolMap.has(stTenantId);
+
+      // School Affiliation Filter
+      if (assignStudentSchoolFilter === 'target' && !isTarget) return false;
+      if (assignStudentSchoolFilter === 'unassigned' && !isUnassigned) return false;
+
+      // Class Filter
+      const activeClassTarget = assignStudentClassFilter === 'match' ? assignmentFormData.className : assignStudentClassFilter;
+      if (activeClassTarget && activeClassTarget !== 'all') {
+        const std = getStudentClass(st);
+        if (activeClassTarget.includes('11') && !std.includes('11') && !st.className?.includes('11')) return false;
+        if (activeClassTarget.includes('12') && !std.includes('12') && !st.className?.includes('12')) return false;
+      }
+
+      // Search Filter
+      if (assignStudentSearch.trim()) {
+        const q = assignStudentSearch.toLowerCase().trim();
+        const nameMatch = (st.name || '').toLowerCase().includes(q);
+        const emailMatch = (st.email || '').toLowerCase().includes(q);
+        const idMatch = (st.studentId || st.id || '').toLowerCase().includes(q);
+        if (!nameMatch && !emailMatch && !idMatch) return false;
+      }
+
+      return true;
+    });
+  }, [allStudents, selectedSchoolId, assignStudentSchoolFilter, assignStudentClassFilter, assignmentFormData.className, assignStudentSearch, schoolMap]);
+
+  const getTrainerTenantId = (tr) => {
+    if (!tr?.tenantId) return null;
+    return (typeof tr.tenantId === 'object' ? (tr.tenantId._id || tr.tenantId.id) : tr.tenantId)?.toString();
+  };
+
+  const targetSchoolTrainerCount = useMemo(() => {
+    if (!selectedSchoolId) return 0;
+    return (allTrainers || []).filter((tr) => getTrainerTenantId(tr) === selectedSchoolId.toString()).length;
+  }, [allTrainers, selectedSchoolId]);
+
+  const unassignedTrainerCount = useMemo(() => {
+    return (allTrainers || []).filter((tr) => {
+      const tId = getTrainerTenantId(tr);
+      return !tId || !schoolMap.has(tId);
+    }).length;
+  }, [allTrainers, schoolMap]);
+
+  const filteredTrainersForAssignment = useMemo(() => {
+    return (allTrainers || []).filter((tr) => {
+      const trTenantId = getTrainerTenantId(tr);
+      const isTarget = Boolean(trTenantId && selectedSchoolId && trTenantId === selectedSchoolId.toString());
+      const isUnassigned = !trTenantId || !schoolMap.has(trTenantId);
+
+      if (assignTrainerFilter === 'target' && !isTarget) return false;
+      if (assignTrainerFilter === 'unassigned' && !isUnassigned) return false;
+
+      if (assignTrainerSearch.trim()) {
+        const q = assignTrainerSearch.toLowerCase().trim();
+        const nameMatch = (tr.name || '').toLowerCase().includes(q);
+        const emailMatch = (tr.email || '').toLowerCase().includes(q);
+        if (!nameMatch && !emailMatch) return false;
+      }
+
+      return true;
+    });
+  }, [allTrainers, selectedSchoolId, assignTrainerFilter, assignTrainerSearch, schoolMap]);
 
   // Load all schools
   const loadSchools = async (status = directoryStatusFilter) => {
@@ -537,7 +643,11 @@ export const MultiSchoolManagementView = () => {
   const handleAssignMembers = async (e) => {
     e.preventDefault();
     if (assignmentFormData.selectedStudentIds.length === 0 && assignmentFormData.selectedTrainerIds.length === 0) {
-      alert('Please select at least one student or trainer to assign.');
+      if (addToast) {
+        addToast('Selection Required', 'Please select at least one student or trainer to assign.', 'amber');
+      } else {
+        alert('Please select at least one student or trainer to assign.');
+      }
       return;
     }
 
@@ -556,14 +666,23 @@ export const MultiSchoolManagementView = () => {
           selectedStudentIds: [],
           selectedTrainerIds: []
         });
-        loadSchools();
-        loadSchoolDetail(selectedSchoolId);
+        await loadMembersForAssignment();
+        await loadSchools();
+        await loadSchoolDetail(selectedSchoolId);
       } else {
-        alert(res?.message || 'Failed to assign members');
+        if (addToast) {
+          addToast('Assignment Notice', res?.message || 'Failed to assign members', 'rose');
+        } else {
+          alert(res?.message || 'Failed to assign members');
+        }
       }
     } catch (err) {
       console.error('Assign members error:', err);
-      alert('Failed to assign members.');
+      if (addToast) {
+        addToast('Error', 'Failed to assign members: ' + err.message, 'rose');
+      } else {
+        alert('Failed to assign members.');
+      }
     }
   };
 
@@ -1882,40 +2001,284 @@ export const MultiSchoolManagementView = () => {
                 </div>
               </div>
 
-              {/* Student Multi-Select */}
-              <div>
-                <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, marginBottom: '0.35rem', color: 'var(--text-primary)' }}>
-                  Select Students to Enroll in this School ({assignmentFormData.selectedStudentIds.length} selected)
-                </label>
-                <div style={{ maxHeight: '180px', overflowY: 'auto', border: '1px solid var(--border-default)', borderRadius: '8px', padding: '0.5rem', backgroundColor: 'var(--bg-subtle)' }}>
-                  {allStudents.length === 0 ? (
-                    <div style={{ padding: '0.5rem', fontSize: '0.82rem', color: 'var(--text-muted)' }}>No student records found in database.</div>
+              {/* Student Multi-Select & Filter Section */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem' }}>
+                  <label style={{ fontSize: '0.85rem', fontWeight: 800, color: 'var(--text-primary)', margin: 0 }}>
+                    Select Students to Enroll in this School ({assignmentFormData.selectedStudentIds.length} selected)
+                  </label>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', fontSize: '0.78rem' }}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const visibleIds = filteredStudentsForAssignment.map(st => st._id || st.id);
+                        const merged = Array.from(new Set([...assignmentFormData.selectedStudentIds, ...visibleIds]));
+                        setAssignmentFormData({ ...assignmentFormData, selectedStudentIds: merged });
+                      }}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        color: 'var(--accent-primary)',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        padding: 0
+                      }}
+                    >
+                      Select All Visible ({filteredStudentsForAssignment.length})
+                    </button>
+                    <span style={{ color: 'var(--text-muted)' }}>•</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAssignmentFormData({ ...assignmentFormData, selectedStudentIds: [] });
+                      }}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        color: 'var(--text-muted)',
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                        padding: 0
+                      }}
+                    >
+                      Clear Selection
+                    </button>
+                  </div>
+                </div>
+
+                {/* Filter Controls Bar */}
+                <div
+                  style={{
+                    display: 'flex',
+                    flexWrap: 'wrap',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: '0.65rem',
+                    padding: '0.65rem 0.85rem',
+                    borderRadius: '8px',
+                    backgroundColor: 'var(--bg-subtle)',
+                    border: '1px solid var(--border-default)'
+                  }}
+                >
+                  {/* Affiliation Tabs */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', flexWrap: 'wrap' }}>
+                    <button
+                      type="button"
+                      onClick={() => setAssignStudentSchoolFilter('target')}
+                      style={{
+                        padding: '0.3rem 0.65rem',
+                        borderRadius: '6px',
+                        fontSize: '0.76rem',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        border: assignStudentSchoolFilter === 'target' ? '1.5px solid var(--accent-primary)' : '1px solid var(--border-default)',
+                        backgroundColor: assignStudentSchoolFilter === 'target' ? 'var(--accent-primary)' : 'var(--bg-card)',
+                        color: assignStudentSchoolFilter === 'target' ? '#ffffff' : 'var(--text-primary)'
+                      }}
+                    >
+                      Enrolled in this School ({targetSchoolStudentCount})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAssignStudentSchoolFilter('unassigned')}
+                      style={{
+                        padding: '0.3rem 0.65rem',
+                        borderRadius: '6px',
+                        fontSize: '0.76rem',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        border: assignStudentSchoolFilter === 'unassigned' ? '1.5px solid var(--accent-primary)' : '1px solid var(--border-default)',
+                        backgroundColor: assignStudentSchoolFilter === 'unassigned' ? 'var(--accent-primary)' : 'var(--bg-card)',
+                        color: assignStudentSchoolFilter === 'unassigned' ? '#ffffff' : 'var(--text-primary)'
+                      }}
+                    >
+                      Unassigned / New ({unassignedStudentCount})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAssignStudentSchoolFilter('all')}
+                      style={{
+                        padding: '0.3rem 0.65rem',
+                        borderRadius: '6px',
+                        fontSize: '0.76rem',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        border: assignStudentSchoolFilter === 'all' ? '1.5px solid var(--accent-primary)' : '1px solid var(--border-default)',
+                        backgroundColor: assignStudentSchoolFilter === 'all' ? 'var(--accent-primary)' : 'var(--bg-card)',
+                        color: assignStudentSchoolFilter === 'all' ? '#ffffff' : 'var(--text-primary)'
+                      }}
+                    >
+                      All Students / Cross-School ({allStudents.length})
+                    </button>
+                  </div>
+
+                  {/* Class Filter & Search */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                      <span style={{ fontSize: '0.74rem', color: 'var(--text-secondary)', fontWeight: 600 }}>Class:</span>
+                      <select
+                        value={assignStudentClassFilter}
+                        onChange={(e) => setAssignStudentClassFilter(e.target.value)}
+                        style={{
+                          padding: '0.25rem 0.5rem',
+                          borderRadius: '6px',
+                          border: '1px solid var(--border-default)',
+                          backgroundColor: 'var(--bg-card)',
+                          color: 'var(--text-primary)',
+                          fontSize: '0.76rem',
+                          fontWeight: 600
+                        }}
+                      >
+                        <option value="match">Match Form ({assignmentFormData.className})</option>
+                        <option value="all">All Classes</option>
+                        <option value="Class 11">Class 11 Only</option>
+                        <option value="Class 12">Class 12 Only</option>
+                      </select>
+                    </div>
+
+                    <div style={{ position: 'relative' }}>
+                      <input
+                        type="text"
+                        placeholder="Search students..."
+                        value={assignStudentSearch}
+                        onChange={(e) => setAssignStudentSearch(e.target.value)}
+                        style={{
+                          padding: '0.25rem 0.5rem 0.25rem 1.6rem',
+                          borderRadius: '6px',
+                          border: '1px solid var(--border-default)',
+                          backgroundColor: 'var(--bg-card)',
+                          color: 'var(--text-primary)',
+                          fontSize: '0.76rem',
+                          width: '150px'
+                        }}
+                      />
+                      <Search size={12} style={{ position: 'absolute', left: '6px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+                      {assignStudentSearch && (
+                        <button
+                          type="button"
+                          onClick={() => setAssignStudentSearch('')}
+                          style={{
+                            position: 'absolute',
+                            right: '4px',
+                            top: '50%',
+                            transform: 'translateY(-50%)',
+                            background: 'none',
+                            border: 'none',
+                            cursor: 'pointer',
+                            color: 'var(--text-muted)',
+                            padding: 0
+                          }}
+                        >
+                          <X size={12} />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Student Scrollable List */}
+                <div style={{ maxHeight: '220px', overflowY: 'auto', border: '1px solid var(--border-default)', borderRadius: '8px', padding: '0.5rem', backgroundColor: 'var(--bg-subtle)' }}>
+                  {filteredStudentsForAssignment.length === 0 ? (
+                    <div style={{ padding: '1rem', textAlign: 'center', fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
+                      {assignStudentSchoolFilter === 'target' && targetSchoolStudentCount === 0 ? (
+                        <div>
+                          <p style={{ margin: '0 0 0.5rem 0', fontWeight: 600, color: 'var(--text-primary)' }}>
+                            No students are currently enrolled in {selectedSchool?.name || 'this school'}.
+                          </p>
+                          <div style={{ display: 'flex', justifyContent: 'center', gap: '0.5rem' }}>
+                            <button
+                              type="button"
+                              onClick={() => setAssignStudentSchoolFilter('unassigned')}
+                              className="btn-secondary"
+                              style={{ padding: '0.25rem 0.65rem', fontSize: '0.74rem' }}
+                            >
+                              Show Unassigned Students ({unassignedStudentCount})
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setAssignStudentSchoolFilter('all')}
+                              className="btn-secondary"
+                              style={{ padding: '0.25rem 0.65rem', fontSize: '0.74rem' }}
+                            >
+                              Show All Students ({allStudents.length})
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <span>No student records match the active filters.</span>
+                      )}
+                    </div>
                   ) : (
-                    allStudents.map(st => {
+                    filteredStudentsForAssignment.map(st => {
                       const stId = st._id || st.id;
                       const isChecked = assignmentFormData.selectedStudentIds.includes(stId);
+                      const stTenantId = getStudentTenantId(st);
+                      const isCurrentSchool = Boolean(stTenantId && selectedSchoolId && stTenantId === selectedSchoolId.toString());
+                      const isUnassigned = !stTenantId || !schoolMap.has(stTenantId);
+                      const schoolAffiliationName = schoolMap.get(stTenantId) || 'Other School';
+                      const stClass = getStudentClass(st);
+
                       return (
-                        <label key={stId} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.3rem 0.5rem', fontSize: '0.84rem', cursor: 'pointer' }}>
-                          <input
-                            type="checkbox"
-                            checked={isChecked}
-                            onChange={(e) => {
-                              if (e.target.checked) {
-                                setAssignmentFormData({
-                                  ...assignmentFormData,
-                                  selectedStudentIds: [...assignmentFormData.selectedStudentIds, stId]
-                                });
-                              } else {
-                                setAssignmentFormData({
-                                  ...assignmentFormData,
-                                  selectedStudentIds: assignmentFormData.selectedStudentIds.filter(id => id !== stId)
-                                });
-                              }
-                            }}
-                          />
-                          <span style={{ fontWeight: 600 }}>{st.name}</span>
-                          <span style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>({st.studentId})</span>
-                          <span style={{ color: 'var(--text-muted)', fontSize: '0.78rem' }}>{st.email}</span>
+                        <label
+                          key={stId}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            gap: '0.5rem',
+                            padding: '0.4rem 0.55rem',
+                            borderRadius: '6px',
+                            backgroundColor: isChecked ? 'rgba(37, 99, 235, 0.08)' : 'transparent',
+                            fontSize: '0.82rem',
+                            cursor: 'pointer',
+                            marginBottom: '2px'
+                          }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap', flex: 1 }}>
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setAssignmentFormData({
+                                    ...assignmentFormData,
+                                    selectedStudentIds: [...assignmentFormData.selectedStudentIds, stId]
+                                  });
+                                } else {
+                                  setAssignmentFormData({
+                                    ...assignmentFormData,
+                                    selectedStudentIds: assignmentFormData.selectedStudentIds.filter(id => id !== stId)
+                                  });
+                                }
+                              }}
+                            />
+                            <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{st.name}</span>
+                            <span style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: '0.74rem' }}>
+                              ({st.studentId})
+                            </span>
+                            {stClass && (
+                              <span style={{ padding: '1px 6px', borderRadius: '4px', fontSize: '0.7rem', fontWeight: 600, backgroundColor: 'rgba(99, 102, 241, 0.1)', color: '#6366F1' }}>
+                                {stClass}
+                              </span>
+                            )}
+                            <span style={{ color: 'var(--text-muted)', fontSize: '0.76rem' }}>{st.email}</span>
+                          </div>
+
+                          <div>
+                            {isCurrentSchool ? (
+                              <span style={{ padding: '2px 7px', borderRadius: '4px', fontSize: '0.7rem', fontWeight: 700, backgroundColor: 'rgba(16, 185, 129, 0.12)', color: '#059669' }}>
+                                ✓ In this School
+                              </span>
+                            ) : isUnassigned ? (
+                              <span style={{ padding: '2px 7px', borderRadius: '4px', fontSize: '0.7rem', fontWeight: 600, backgroundColor: 'rgba(100, 116, 139, 0.12)', color: '#64748B' }}>
+                                Unassigned
+                              </span>
+                            ) : (
+                              <span style={{ padding: '2px 7px', borderRadius: '4px', fontSize: '0.7rem', fontWeight: 700, backgroundColor: 'rgba(217, 119, 6, 0.12)', color: '#D97706' }}>
+                                Enrolled: {schoolAffiliationName}
+                              </span>
+                            )}
+                          </div>
                         </label>
                       );
                     })
@@ -1923,39 +2286,223 @@ export const MultiSchoolManagementView = () => {
                 </div>
               </div>
 
-              {/* Trainer Multi-Select */}
-              <div>
-                <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, marginBottom: '0.35rem', color: 'var(--text-primary)' }}>
-                  Designate Trainers for this School ({assignmentFormData.selectedTrainerIds.length} selected)
-                </label>
-                <div style={{ maxHeight: '140px', overflowY: 'auto', border: '1px solid var(--border-default)', borderRadius: '8px', padding: '0.5rem', backgroundColor: 'var(--bg-subtle)' }}>
-                  {allTrainers.length === 0 ? (
-                    <div style={{ padding: '0.5rem', fontSize: '0.82rem', color: 'var(--text-muted)' }}>No trainers found.</div>
+              {/* Trainer Multi-Select & Filter Section */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem' }}>
+                  <label style={{ fontSize: '0.85rem', fontWeight: 800, color: 'var(--text-primary)', margin: 0 }}>
+                    Designate Trainers for this School ({assignmentFormData.selectedTrainerIds.length} selected)
+                  </label>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', fontSize: '0.78rem' }}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const visibleIds = filteredTrainersForAssignment.map(tr => tr._id || tr.id);
+                        const merged = Array.from(new Set([...assignmentFormData.selectedTrainerIds, ...visibleIds]));
+                        setAssignmentFormData({ ...assignmentFormData, selectedTrainerIds: merged });
+                      }}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        color: 'var(--accent-primary)',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        padding: 0
+                      }}
+                    >
+                      Select All Visible ({filteredTrainersForAssignment.length})
+                    </button>
+                    <span style={{ color: 'var(--text-muted)' }}>•</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAssignmentFormData({ ...assignmentFormData, selectedTrainerIds: [] });
+                      }}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        color: 'var(--text-muted)',
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                        padding: 0
+                      }}
+                    >
+                      Clear Selection
+                    </button>
+                  </div>
+                </div>
+
+                {/* Trainer Filter Toolbar */}
+                <div
+                  style={{
+                    display: 'flex',
+                    flexWrap: 'wrap',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: '0.65rem',
+                    padding: '0.55rem 0.85rem',
+                    borderRadius: '8px',
+                    backgroundColor: 'var(--bg-subtle)',
+                    border: '1px solid var(--border-default)'
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', flexWrap: 'wrap' }}>
+                    <button
+                      type="button"
+                      onClick={() => setAssignTrainerFilter('all')}
+                      style={{
+                        padding: '0.25rem 0.55rem',
+                        borderRadius: '6px',
+                        fontSize: '0.74rem',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        border: assignTrainerFilter === 'all' ? '1.5px solid var(--accent-primary)' : '1px solid var(--border-default)',
+                        backgroundColor: assignTrainerFilter === 'all' ? 'var(--accent-primary)' : 'var(--bg-card)',
+                        color: assignTrainerFilter === 'all' ? '#ffffff' : 'var(--text-primary)'
+                      }}
+                    >
+                      All Educators ({allTrainers.length})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAssignTrainerFilter('target')}
+                      style={{
+                        padding: '0.25rem 0.55rem',
+                        borderRadius: '6px',
+                        fontSize: '0.74rem',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        border: assignTrainerFilter === 'target' ? '1.5px solid var(--accent-primary)' : '1px solid var(--border-default)',
+                        backgroundColor: assignTrainerFilter === 'target' ? 'var(--accent-primary)' : 'var(--bg-card)',
+                        color: assignTrainerFilter === 'target' ? '#ffffff' : 'var(--text-primary)'
+                      }}
+                    >
+                      Assigned to this School ({targetSchoolTrainerCount})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAssignTrainerFilter('unassigned')}
+                      style={{
+                        padding: '0.25rem 0.55rem',
+                        borderRadius: '6px',
+                        fontSize: '0.74rem',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        border: assignTrainerFilter === 'unassigned' ? '1.5px solid var(--accent-primary)' : '1px solid var(--border-default)',
+                        backgroundColor: assignTrainerFilter === 'unassigned' ? 'var(--accent-primary)' : 'var(--bg-card)',
+                        color: assignTrainerFilter === 'unassigned' ? '#ffffff' : 'var(--text-primary)'
+                      }}
+                    >
+                      Available / Unassigned ({unassignedTrainerCount})
+                    </button>
+                  </div>
+
+                  <div style={{ position: 'relative' }}>
+                    <input
+                      type="text"
+                      placeholder="Search educators..."
+                      value={assignTrainerSearch}
+                      onChange={(e) => setAssignTrainerSearch(e.target.value)}
+                      style={{
+                        padding: '0.25rem 0.5rem 0.25rem 1.6rem',
+                        borderRadius: '6px',
+                        border: '1px solid var(--border-default)',
+                        backgroundColor: 'var(--bg-card)',
+                        color: 'var(--text-primary)',
+                        fontSize: '0.76rem',
+                        width: '150px'
+                      }}
+                    />
+                    <Search size={12} style={{ position: 'absolute', left: '6px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+                    {assignTrainerSearch && (
+                      <button
+                        type="button"
+                        onClick={() => setAssignTrainerSearch('')}
+                        style={{
+                          position: 'absolute',
+                          right: '4px',
+                          top: '50%',
+                          transform: 'translateY(-50%)',
+                          background: 'none',
+                          border: 'none',
+                          cursor: 'pointer',
+                          color: 'var(--text-muted)',
+                          padding: 0
+                        }}
+                      >
+                        <X size={12} />
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Trainer Scrollable List */}
+                <div style={{ maxHeight: '160px', overflowY: 'auto', border: '1px solid var(--border-default)', borderRadius: '8px', padding: '0.5rem', backgroundColor: 'var(--bg-subtle)' }}>
+                  {filteredTrainersForAssignment.length === 0 ? (
+                    <div style={{ padding: '0.75rem', textAlign: 'center', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+                      No educator records match the active filter.
+                    </div>
                   ) : (
-                    allTrainers.map(tr => {
+                    filteredTrainersForAssignment.map(tr => {
                       const trId = tr._id || tr.id;
                       const isChecked = assignmentFormData.selectedTrainerIds.includes(trId);
+                      const trTenantId = getTrainerTenantId(tr);
+                      const isCurrentSchool = Boolean(trTenantId && selectedSchoolId && trTenantId === selectedSchoolId.toString());
+                      const isUnassigned = !trTenantId || !schoolMap.has(trTenantId);
+                      const schoolAffiliationName = schoolMap.get(trTenantId) || 'Other School';
+
                       return (
-                        <label key={trId} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.3rem 0.5rem', fontSize: '0.84rem', cursor: 'pointer' }}>
-                          <input
-                            type="checkbox"
-                            checked={isChecked}
-                            onChange={(e) => {
-                              if (e.target.checked) {
-                                setAssignmentFormData({
-                                  ...assignmentFormData,
-                                  selectedTrainerIds: [...assignmentFormData.selectedTrainerIds, trId]
-                                });
-                              } else {
-                                setAssignmentFormData({
-                                  ...assignmentFormData,
-                                  selectedTrainerIds: assignmentFormData.selectedTrainerIds.filter(id => id !== trId)
-                                });
-                              }
-                            }}
-                          />
-                          <span style={{ fontWeight: 600 }}>{tr.name}</span>
-                          <span style={{ color: 'var(--text-muted)', fontSize: '0.78rem' }}>{tr.email}</span>
+                        <label
+                          key={trId}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            gap: '0.5rem',
+                            padding: '0.35rem 0.55rem',
+                            borderRadius: '6px',
+                            backgroundColor: isChecked ? 'rgba(37, 99, 235, 0.08)' : 'transparent',
+                            fontSize: '0.82rem',
+                            cursor: 'pointer',
+                            marginBottom: '2px'
+                          }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap', flex: 1 }}>
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setAssignmentFormData({
+                                    ...assignmentFormData,
+                                    selectedTrainerIds: [...assignmentFormData.selectedTrainerIds, trId]
+                                  });
+                                } else {
+                                  setAssignmentFormData({
+                                    ...assignmentFormData,
+                                    selectedTrainerIds: assignmentFormData.selectedTrainerIds.filter(id => id !== trId)
+                                  });
+                                }
+                              }}
+                            />
+                            <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{tr.name}</span>
+                            <span style={{ color: 'var(--text-muted)', fontSize: '0.76rem' }}>{tr.email}</span>
+                          </div>
+
+                          <div>
+                            {isCurrentSchool ? (
+                              <span style={{ padding: '2px 7px', borderRadius: '4px', fontSize: '0.7rem', fontWeight: 700, backgroundColor: 'rgba(16, 185, 129, 0.12)', color: '#059669' }}>
+                                ✓ Assigned: {selectedSchool?.name || 'This School'} {tr.batchName ? `(${tr.batchName})` : ''}
+                              </span>
+                            ) : isUnassigned ? (
+                              <span style={{ padding: '2px 7px', borderRadius: '4px', fontSize: '0.7rem', fontWeight: 600, backgroundColor: 'rgba(100, 116, 139, 0.12)', color: '#64748B' }}>
+                                Available / Unassigned
+                              </span>
+                            ) : (
+                              <span style={{ padding: '2px 7px', borderRadius: '4px', fontSize: '0.7rem', fontWeight: 700, backgroundColor: 'rgba(217, 119, 6, 0.12)', color: '#D97706' }}>
+                                Affiliated: {schoolAffiliationName}
+                              </span>
+                            )}
+                          </div>
                         </label>
                       );
                     })

@@ -319,6 +319,7 @@ router.get('/homework', async (req, res) => {
         points: hw.points || 20,
         description: hw.description || '',
         requirements: hw.requirements || [],
+        questions: hw.questions || [],
         status, // 'pending', 'submitted', 'graded', 'needs_revision'
         score: sub?.score ?? null,
         grade: sub?.score ?? null,
@@ -496,7 +497,10 @@ router.get('/tests', async (req, res) => {
         violationCount: att?.violationCount ?? 0,
         integrityStatus: att?.integrityStatus ?? 'normal',
         teacherFeedback: att?.teacherFeedback ?? null,
-        challenge: exam.challenge || null
+        challenge: exam.challenge || null,
+        questions: exam.questions || [],
+        language: exam.language || 'python',
+        description: exam.description || ''
       };
     });
 

@@ -3201,6 +3201,8 @@ router.post('/schools/:id/assign', async (req, res) => {
             $set: {
               tenantId: id,
               className,
+              standard: className,
+              'schoolProfile.standard': className,
               batchId: resolvedCohort._id,
               batch: resolvedCohort.name
             }
@@ -3211,17 +3213,16 @@ router.post('/schools/:id/assign', async (req, res) => {
 
       if (educators.length > 0) {
         const educatorOids = educators.map((e) => e._id);
-        // Ensure tenantId is updated to the school
+        // Ensure tenantId and cohort batch are updated to the school
         await User.updateMany(
           { _id: { $in: educatorOids } },
-          { $set: { tenantId: id } },
-          sessionOpts
-        );
-
-        // Assign primary batchId if educator does not have one
-        await User.updateMany(
-          { _id: { $in: educatorOids }, batchId: null },
-          { $set: { batchId: resolvedCohort._id, batch: resolvedCohort.name } },
+          {
+            $set: {
+              tenantId: id,
+              batchId: resolvedCohort._id,
+              batch: resolvedCohort.name
+            }
+          },
           sessionOpts
         );
 
@@ -3402,7 +3403,7 @@ router.post('/schools/:id/assign-content', async (req, res) => {
       return res.status(403).json({ success: false, message: 'Unauthorized school scope.' });
     }
 
-    const { contentType, cohortId, title, description, subject, dueDate, date, points, durationMinutes } = req.body;
+    const { contentType, cohortId, title, description, subject, dueDate, date, points, durationMinutes, questions, language } = req.body;
 
     if (!title || !title.trim()) {
       return res.status(400).json({ success: false, message: 'Title is required.' });
@@ -3421,6 +3422,7 @@ router.post('/schools/:id/assign-content', async (req, res) => {
         description: description || '',
         dueDate: dueDate ? new Date(dueDate) : new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
         points: points || 20,
+        questions: Array.isArray(questions) ? questions : [],
         status: 'published'
       });
     } else if (contentType === 'assessment' || contentType === 'test') {
@@ -3431,9 +3433,11 @@ router.post('/schools/:id/assign-content', async (req, res) => {
         batchId: cohortId || undefined,
         title: title.trim(),
         subject: subject || 'Python Programming',
+        language: language || 'python',
         date: date ? new Date(date) : new Date(),
         durationMinutes: durationMinutes || 45,
         totalMarks: points || 20,
+        questions: Array.isArray(questions) ? questions : [],
         isCodingExam: true
       });
     } else if (contentType === 'announcement') {
