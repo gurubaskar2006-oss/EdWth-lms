@@ -2199,13 +2199,14 @@ export const TestsManagementView = () => {
   const [showScheduleModal, setShowScheduleModal] = useState(false);
   const [testTitle, setTestTitle] = useState('');
   const [testSubject, setTestSubject] = useState('Python Programming');
-  const [testDate, setTestDate] = useState('Oct 10, 2026');
+  const [testDate, setTestDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [testTime, setTestTime] = useState('10:00 - 11:00 AM');
   const [testRoom, setTestRoom] = useState('Computer Lab 1');
   const [testMarks, setTestMarks] = useState(100);
   const [testDuration, setTestDuration] = useState(45);
   const [scheduleBatchId, setScheduleBatchId] = useState('');
   const [testQuestions, setTestQuestions] = useState([]);
+  const [testFilter, setTestFilter] = useState('all'); // 'all' | 'active' | 'upcoming' | 'concluded'
 
   // Assign Modal State
   const [showAssignModal, setShowAssignModal] = useState(false);
@@ -2232,6 +2233,37 @@ export const TestsManagementView = () => {
     if (!dateVal) return 'TBD';
     const d = new Date(dateVal);
     return isNaN(d.getTime()) ? String(dateVal) : d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  };
+
+  // Authoritative Test Lifecycle Status Formatter
+  const getTestStatusBadge = (t) => {
+    const raw = t?.rawDate || t?.date;
+    if (!raw) return { label: 'Scheduled', color: '#2563EB', bg: 'rgba(37, 99, 235, 0.1)', border: 'rgba(37, 99, 235, 0.25)', type: 'upcoming' };
+    const examDate = new Date(raw);
+    if (isNaN(examDate.getTime())) {
+      const dayStatus = String(t.day || '').toLowerCase();
+      if (dayStatus.includes('active') || dayStatus.includes('today')) {
+        return { label: 'Active Today', color: '#059669', bg: 'rgba(5, 150, 105, 0.12)', border: 'rgba(5, 150, 105, 0.25)', type: 'active' };
+      }
+      if (dayStatus.includes('concluded') || dayStatus.includes('over') || dayStatus.includes('missed')) {
+        return { label: 'Concluded / Over', color: '#6B7280', bg: 'rgba(107, 114, 128, 0.12)', border: 'rgba(107, 114, 128, 0.25)', type: 'concluded' };
+      }
+      return { label: t.day || 'Scheduled', color: '#2563EB', bg: 'rgba(37, 99, 235, 0.1)', border: 'rgba(37, 99, 235, 0.25)', type: 'upcoming' };
+    }
+    const today = new Date();
+    const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 0, 0, 0, 0).getTime();
+    const endOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59, 999).getTime();
+
+    const startOfExam = new Date(examDate.getFullYear(), examDate.getMonth(), examDate.getDate(), 0, 0, 0, 0).getTime();
+    const endOfExam = new Date(examDate.getFullYear(), examDate.getMonth(), examDate.getDate(), 23, 59, 59, 999).getTime();
+
+    if (endOfExam < startOfToday) {
+      return { label: 'Concluded / Over', color: '#6B7280', bg: 'rgba(107, 114, 128, 0.12)', border: 'rgba(107, 114, 128, 0.25)', type: 'concluded' };
+    } else if (startOfExam > endOfToday) {
+      return { label: 'Upcoming', color: '#2563EB', bg: 'rgba(37, 99, 235, 0.1)', border: 'rgba(37, 99, 235, 0.25)', type: 'upcoming' };
+    } else {
+      return { label: 'Active Today', color: '#059669', bg: 'rgba(5, 150, 105, 0.12)', border: 'rgba(5, 150, 105, 0.25)', type: 'active' };
+    }
   };
 
   // Fetch authoritative scheduled tests
@@ -2385,6 +2417,7 @@ export const TestsManagementView = () => {
         setShowScheduleModal(false);
         setTestTitle('');
         setTestQuestions([]);
+        setTestDate(new Date().toISOString().split('T')[0]);
         addToast('Assessment Scheduled', `Published "${payload.title}" to student schedules.`, 'emerald');
       } else {
         addToast('Notice', res?.message || 'Failed to schedule assessment.', 'amber');
@@ -2541,61 +2574,156 @@ export const TestsManagementView = () => {
             </button>
           </div>
         ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '1.25rem' }}>
-            {testsList.map((t, i) => (
-              <div key={t.id || t._id || i} className="card" style={{ padding: '1.5rem', borderRadius: '16px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
-                  <span style={{ fontSize: '0.72rem', fontWeight: 800, padding: '0.2rem 0.5rem', borderRadius: '6px', backgroundColor: 'rgba(37, 99, 235, 0.12)', color: '#2563EB', textTransform: 'uppercase' }}>
-                    {t.subject || 'General'}
-                  </span>
-                  <span style={{ fontSize: '0.78rem', fontWeight: 700, color: '#D97706' }}>
-                    {t.day || 'Scheduled'}
-                  </span>
-                </div>
-
-                <h3 style={{ fontSize: '1.1rem', fontWeight: 800, color: 'var(--text-primary)', margin: '0 0 0.5rem' }}>
-                  {t.title}
-                </h3>
-
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
-                  <div>Date: <strong>{formatDateSafe(t.date)}</strong></div>
-                  <div>Time: <strong>{t.time || '10:00 AM'}</strong></div>
-                  <div>Venue: <strong>{t.room || 'Online Exam Hall'}</strong></div>
-                  <div>Maximum Marks: <strong>{t.totalMarks || 100} Marks</strong></div>
-                  <div>Duration: <strong>{t.durationMinutes || 45} Minutes</strong></div>
-                </div>
-
-                <div style={{ marginTop: '1.25rem', paddingTop: '0.85rem', borderTop: '1px solid var(--border-default)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                    <span style={{ fontSize: '0.72rem', color: t.className ? '#2563EB' : '#059669', fontWeight: 700, backgroundColor: t.className ? 'rgba(37, 99, 235, 0.1)' : 'rgba(5, 150, 105, 0.1)', padding: '0.2rem 0.5rem', borderRadius: '4px' }}>
-                      {t.className ? `Assigned: ${t.className}` : 'Paper Verified'}
-                    </span>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                    <button
-                      onClick={() => {
-                        setTestToAssign(t);
-                        setSelectedBatchId(t.batchId || (classesList[0]?.id || classesList[0]?._id || ''));
-                        setShowAssignModal(true);
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+            {/* Status Filter Navigation Tabs */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap', paddingBottom: '0.25rem' }}>
+              {[
+                { id: 'all', label: 'All Assessments', count: testsList.length },
+                { id: 'active', label: 'Active Today', count: testsList.filter((t) => getTestStatusBadge(t).type === 'active').length, color: '#059669' },
+                { id: 'upcoming', label: 'Upcoming', count: testsList.filter((t) => getTestStatusBadge(t).type === 'upcoming').length, color: '#2563EB' },
+                { id: 'concluded', label: 'Concluded / Over', count: testsList.filter((t) => getTestStatusBadge(t).type === 'concluded').length, color: '#6B7280' }
+              ].map((tab) => {
+                const isActive = testFilter === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    onClick={() => setTestFilter(tab.id)}
+                    style={{
+                      padding: '0.4rem 0.85rem',
+                      borderRadius: '8px',
+                      fontSize: '0.82rem',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      border: isActive ? `1.5px solid ${tab.color || '#2563EB'}` : '1px solid var(--border-default)',
+                      backgroundColor: isActive ? (tab.color ? `${tab.color}15` : 'rgba(37, 99, 235, 0.1)') : 'var(--bg-secondary)',
+                      color: isActive ? (tab.color || '#2563EB') : 'var(--text-secondary)',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.4rem',
+                      transition: 'all 0.15s ease'
+                    }}
+                  >
+                    <span>{tab.label}</span>
+                    <span
+                      style={{
+                        padding: '1px 6px',
+                        borderRadius: '10px',
+                        fontSize: '0.72rem',
+                        fontWeight: 800,
+                        backgroundColor: isActive ? (tab.color || '#2563EB') : 'var(--border-default)',
+                        color: isActive ? '#FFFFFF' : 'var(--text-secondary)'
                       }}
-                      className="btn-secondary"
-                      style={{ fontSize: '0.78rem', padding: '0.35rem 0.75rem', display: 'flex', alignItems: 'center', gap: '0.3rem', borderColor: '#2563EB', color: '#2563EB' }}
                     >
-                      <UserCheck size={14} />
-                      <span>Assign</span>
-                    </button>
-                    <button
-                      onClick={() => printTestRoster(t)}
-                      className="btn-text"
-                      style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.3rem' }}
-                    >
-                      <Printer size={14} />
-                      <span>Hall Sheet</span>
-                    </button>
+                      {tab.count}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Test Cards Grid */}
+            {(() => {
+              const filteredList = testsList.filter((t) => {
+                if (testFilter === 'all') return true;
+                return getTestStatusBadge(t).type === testFilter;
+              });
+
+              if (filteredList.length === 0) {
+                return (
+                  <div className="card" style={{ padding: '2.5rem', textAlign: 'center', borderRadius: '14px' }}>
+                    <p style={{ color: 'var(--text-secondary)', fontSize: '0.88rem', margin: 0 }}>
+                      No assessments matching the "<strong>{testFilter}</strong>" filter.
+                    </p>
                   </div>
+                );
+              }
+
+              return (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '1.25rem' }}>
+                  {filteredList.map((t, i) => {
+                    const badge = getTestStatusBadge(t);
+                    const isConcluded = badge.type === 'concluded';
+                    return (
+                      <div
+                        key={t.id || t._id || i}
+                        className="card"
+                        style={{
+                          padding: '1.5rem',
+                          borderRadius: '16px',
+                          opacity: isConcluded ? 0.85 : 1,
+                          border: badge.type === 'active' ? '1.5px solid #059669' : undefined
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem', gap: '0.5rem' }}>
+                          <span style={{ fontSize: '0.72rem', fontWeight: 800, padding: '0.2rem 0.5rem', borderRadius: '6px', backgroundColor: 'rgba(37, 99, 235, 0.12)', color: '#2563EB', textTransform: 'uppercase' }}>
+                            {t.subject || 'General'}
+                          </span>
+                          <span
+                            style={{
+                              fontSize: '0.74rem',
+                              fontWeight: 800,
+                              padding: '0.2rem 0.6rem',
+                              borderRadius: '6px',
+                              backgroundColor: badge.bg,
+                              color: badge.color,
+                              border: `1px solid ${badge.border}`,
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px'
+                            }}
+                          >
+                            <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: badge.color }} />
+                            {badge.label}
+                          </span>
+                        </div>
+
+                        <h3 style={{ fontSize: '1.1rem', fontWeight: 800, color: 'var(--text-primary)', margin: '0 0 0.5rem' }}>
+                          {t.title}
+                        </h3>
+
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
+                          <div>Date: <strong>{formatDateSafe(t.date)}</strong></div>
+                          <div>Time: <strong>{t.time || '10:00 AM'}</strong></div>
+                          <div>Venue: <strong>{t.room || 'Online Exam Hall'}</strong></div>
+                          <div>Maximum Marks: <strong>{t.totalMarks || 100} Marks</strong></div>
+                          <div>Duration: <strong>{t.durationMinutes || 45} Minutes</strong></div>
+                        </div>
+
+                        <div style={{ marginTop: '1.25rem', paddingTop: '0.85rem', borderTop: '1px solid var(--border-default)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                            <span style={{ fontSize: '0.72rem', color: t.className ? '#2563EB' : '#059669', fontWeight: 700, backgroundColor: t.className ? 'rgba(37, 99, 235, 0.1)' : 'rgba(5, 150, 105, 0.1)', padding: '0.2rem 0.5rem', borderRadius: '4px' }}>
+                              {t.className ? `Assigned: ${t.className}` : 'Paper Verified'}
+                            </span>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                            <button
+                              onClick={() => {
+                                setTestToAssign(t);
+                                setSelectedBatchId(t.batchId || (classesList[0]?.id || classesList[0]?._id || ''));
+                                setShowAssignModal(true);
+                              }}
+                              className="btn-secondary"
+                              style={{ fontSize: '0.78rem', padding: '0.35rem 0.75rem', display: 'flex', alignItems: 'center', gap: '0.3rem', borderColor: '#2563EB', color: '#2563EB' }}
+                            >
+                              <UserCheck size={14} />
+                              <span>Assign</span>
+                            </button>
+                            <button
+                              onClick={() => printTestRoster(t)}
+                              className="btn-text"
+                              style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.3rem' }}
+                            >
+                              <Printer size={14} />
+                              <span>Hall Sheet</span>
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
-              </div>
-            ))}
+              );
+            })()}
           </div>
         )
       )}
@@ -3187,7 +3315,7 @@ export const TestsManagementView = () => {
                     Exam Date
                   </label>
                   <input
-                    type="text"
+                    type="date"
                     value={testDate}
                     onChange={(e) => setTestDate(e.target.value)}
                     required

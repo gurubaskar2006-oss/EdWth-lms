@@ -19,7 +19,9 @@ import {
   Clock,
   AlertTriangle,
   EyeOff,
-  CameraOff
+  CameraOff,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react';
 import Editor from '@monaco-editor/react';
 
@@ -61,6 +63,60 @@ export const AssessmentEditorModal = ({ challenge, onClose }) => {
   const [activeQuestionIndex, setActiveQuestionIndex] = useState(0);
   const [questionAnswers, setQuestionAnswers] = useState({});
   const activeQuestion = hasMultipleQuestions ? challenge.questions[activeQuestionIndex] : null;
+  const isCodingQuestion = !activeQuestion || activeQuestion.type === 'coding';
+  const getQuestionId = (q, idx) => q?.id || q?._id?.toString() || ('q_' + idx);
+
+  // Save current question answer and navigate between questions/categories
+  const handleSaveAndNavigate = (targetIndex) => {
+    if (!challenge?.questions) return;
+    if (targetIndex >= challenge.questions.length) {
+      setShowSubmitConfirm(true);
+      return;
+    }
+    if (targetIndex < 0) return;
+
+    // Save current answer state
+    const currentQ = activeQuestion;
+    const currentQId = getQuestionId(currentQ, activeQuestionIndex);
+    if (currentQ?.type === 'coding') {
+      setQuestionAnswers((prev) => ({ ...prev, [currentQId]: code }));
+    }
+
+    const nextQ = challenge.questions[targetIndex];
+    const nextQId = getQuestionId(nextQ, targetIndex);
+
+    // If next question is coding, load its saved code or starterCode
+    if (nextQ?.type === 'coding') {
+      const savedCode = questionAnswers[nextQId];
+      if (savedCode !== undefined) {
+        setCode(savedCode);
+      } else if (nextQ.starterCode) {
+        setCode(nextQ.starterCode);
+      }
+      if (nextQ.language) {
+        setSelectedLangId(nextQ.language === 'c++' ? 'cpp' : nextQ.language);
+      }
+    }
+
+    // Check if category changed to show informative feedback
+    if (currentQ && nextQ && currentQ.type !== nextQ.type) {
+      const categoryNames = {
+        mcq: 'Multiple Choice Questions',
+        paragraph: 'Descriptive / Paragraph Questions',
+        descriptive: 'Descriptive Questions',
+        coding: 'Coding Challenge'
+      };
+      addToast(
+        'Section Transition',
+        `Progress saved. Moving to ${categoryNames[nextQ.type] || nextQ.type.toUpperCase()}.`,
+        'emerald'
+      );
+    } else {
+      addToast('Answer Saved', `Answer recorded for Question ${activeQuestionIndex + 1}.`, 'emerald');
+    }
+
+    setActiveQuestionIndex(targetIndex);
+  };
 
   // ─── Security & Proctoring States ──────────────────────────────────────────
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -513,12 +569,18 @@ export const AssessmentEditorModal = ({ challenge, onClose }) => {
     const isViolationsTermination = submitReason === 'TERMINATED_MAX_WARNINGS' || isTerminated || violationCount >= 3;
     try {
       if (challenge?.id) {
-        const structuredAnswers = hasMultipleQuestions ? challenge.questions.map((q) => ({
-          questionId: q.id,
-          type: q.type,
-          title: q.title || '',
-          answer: q.type === 'coding' ? code : (questionAnswers[q.id] !== undefined ? questionAnswers[q.id] : '')
-        })) : [{ code, language: selectedLangId }];
+        const structuredAnswers = hasMultipleQuestions ? challenge.questions.map((q, idx) => {
+          const qId = getQuestionId(q, idx);
+          const ans = q.type === 'coding'
+            ? (activeQuestionIndex === idx ? code : (questionAnswers[qId] || code))
+            : (questionAnswers[qId] !== undefined ? questionAnswers[qId] : '');
+          return {
+            questionId: qId,
+            type: q.type,
+            title: q.title || '',
+            answer: ans
+          };
+        }) : [{ code, language: selectedLangId }];
 
         await apiService.submitAssessment(challenge.id, {
           code,
@@ -913,16 +975,12 @@ export const AssessmentEditorModal = ({ challenge, onClose }) => {
           </span>
           {challenge.questions.map((q, idx) => {
             const isCurrent = activeQuestionIndex === idx;
-            const hasAns = questionAnswers[q.id] !== undefined || (q.type === 'coding' && code.trim().length > 0);
+            const qId = getQuestionId(q, idx);
+            const hasAns = questionAnswers[qId] !== undefined || (q.type === 'coding' && (activeQuestionIndex === idx ? code.trim().length > 0 : (questionAnswers[qId] || '').trim().length > 0));
             return (
               <button
-                key={q.id || idx}
-                onClick={() => {
-                  setActiveQuestionIndex(idx);
-                  if (q.type === 'coding' && q.language) {
-                    setSelectedLangId(q.language === 'c++' ? 'cpp' : q.language);
-                  }
-                }}
+                key={qId}
+                onClick={() => handleSaveAndNavigate(idx)}
                 style={{
                   padding: '0.35rem 0.8rem',
                   borderRadius: '6px',
@@ -976,86 +1034,110 @@ export const AssessmentEditorModal = ({ challenge, onClose }) => {
               fontWeight: 800,
               padding: '2px 8px',
               borderRadius: '4px',
-              backgroundColor: '#FEF3C7',
-              color: '#D97706'
+              backgroundColor: isCodingQuestion ? '#FEF3C7' : '#DBEAFE',
+              color: isCodingQuestion ? '#D97706' : '#2563EB',
+              textTransform: 'uppercase'
             }}
           >
-            {challenge.difficulty || 'Medium'}
+            {activeQuestion ? (activeQuestion.type === 'mcq' ? 'Multiple Choice Section' : activeQuestion.type === 'coding' ? 'Coding Section' : 'Descriptive Section') : (challenge.difficulty || 'Medium')}
           </span>
           <span style={{ fontSize: '0.8rem', color: '#CBD5E1', lineHeight: 1.4 }}>
-            {challenge.description}
+            {activeQuestion?.prompt ? (activeQuestion.prompt.length > 95 ? `${activeQuestion.prompt.slice(0, 95)}...` : activeQuestion.prompt) : challenge.description}
           </span>
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
-          {challenge.hint && (
-            <button
-              onClick={() => setShowHint(!showHint)}
-              style={{
-                background: 'none',
-                border: 'none',
-                color: showHint ? '#F59E0B' : '#94A3B8',
-                fontSize: '0.76rem',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '4px',
-                cursor: 'pointer',
-                fontWeight: 600
-              }}
-            >
-              <Lightbulb size={14} color={showHint ? '#F59E0B' : '#94A3B8'} />
-              <span>{showHint ? 'Hide Hint' : 'Hint'}</span>
-            </button>
+          {isCodingQuestion ? (
+            <>
+              {challenge.hint && (
+                <button
+                  onClick={() => setShowHint(!showHint)}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: showHint ? '#F59E0B' : '#94A3B8',
+                    fontSize: '0.76rem',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    cursor: 'pointer',
+                    fontWeight: 600
+                  }}
+                >
+                  <Lightbulb size={14} color={showHint ? '#F59E0B' : '#94A3B8'} />
+                  <span>{showHint ? 'Hide Hint' : 'Hint'}</span>
+                </button>
+              )}
+
+              {/* Language Selector */}
+              <div style={{ position: 'relative' }}>
+                <select
+                  value={selectedLangId}
+                  onChange={(e) => handleLanguageChange(e.target.value)}
+                  style={{
+                    padding: '0.35rem 2rem 0.35rem 0.75rem',
+                    borderRadius: '6px',
+                    backgroundColor: '#1E293B',
+                    border: '1px solid #334155',
+                    color: '#F8FAFC',
+                    fontSize: '0.78rem',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    appearance: 'none'
+                  }}
+                >
+                  {PROGRAMMING_LANGUAGES.map((lang) => (
+                    <option key={lang.id} value={lang.id}>
+                      {lang.name}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown
+                  size={13}
+                  style={{ position: 'absolute', right: '8px', top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: '#94A3B8' }}
+                />
+              </div>
+
+              <button
+                onClick={handleReset}
+                className="btn-secondary"
+                style={{ padding: '0.35rem 0.65rem', fontSize: '0.76rem', gap: '4px', backgroundColor: '#1E293B', borderColor: '#334155', color: '#CBD5E1' }}
+                title="Reset code template"
+              >
+                <RotateCcw size={13} />
+                <span>Reset</span>
+              </button>
+
+              <button
+                onClick={handleRunCode}
+                disabled={isRunning || isTimeExpired}
+                className="btn-primary"
+                style={{ padding: '0.4rem 1.25rem', fontSize: '0.82rem', gap: '6px', fontWeight: 800 }}
+              >
+                <Play size={13} fill="currentColor" />
+                <span>{isTimeExpired ? 'Assessment Expired' : isRunning ? 'Executing Tests...' : 'Run Test Cases'}</span>
+              </button>
+            </>
+          ) : (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+              <span style={{ fontSize: '0.76rem', color: '#94A3B8', fontWeight: 600 }}>
+                Question {activeQuestionIndex + 1} of {challenge.questions?.length || 1}
+              </span>
+              <span
+                style={{
+                  fontSize: '0.74rem',
+                  fontWeight: 700,
+                  padding: '3px 8px',
+                  borderRadius: '6px',
+                  backgroundColor: questionAnswers[getQuestionId(activeQuestion, activeQuestionIndex)] !== undefined ? 'rgba(5, 150, 105, 0.15)' : 'rgba(217, 119, 6, 0.15)',
+                  color: questionAnswers[getQuestionId(activeQuestion, activeQuestionIndex)] !== undefined ? '#34D399' : '#FBBF24',
+                  border: questionAnswers[getQuestionId(activeQuestion, activeQuestionIndex)] !== undefined ? '1px solid rgba(5, 150, 105, 0.3)' : '1px solid rgba(217, 119, 6, 0.3)'
+                }}
+              >
+                {questionAnswers[getQuestionId(activeQuestion, activeQuestionIndex)] !== undefined ? '● Answer Recorded' : '○ Pending Answer'}
+              </span>
+            </div>
           )}
-
-          {/* Language Selector */}
-          <div style={{ position: 'relative' }}>
-            <select
-              value={selectedLangId}
-              onChange={(e) => handleLanguageChange(e.target.value)}
-              style={{
-                padding: '0.35rem 2rem 0.35rem 0.75rem',
-                borderRadius: '6px',
-                backgroundColor: '#1E293B',
-                border: '1px solid #334155',
-                color: '#F8FAFC',
-                fontSize: '0.78rem',
-                fontWeight: 700,
-                cursor: 'pointer',
-                appearance: 'none'
-              }}
-            >
-              {PROGRAMMING_LANGUAGES.map((lang) => (
-                <option key={lang.id} value={lang.id}>
-                  {lang.name}
-                </option>
-              ))}
-            </select>
-            <ChevronDown
-              size={13}
-              style={{ position: 'absolute', right: '8px', top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: '#94A3B8' }}
-            />
-          </div>
-
-          <button
-            onClick={handleReset}
-            className="btn-secondary"
-            style={{ padding: '0.35rem 0.65rem', fontSize: '0.76rem', gap: '4px', backgroundColor: '#1E293B', borderColor: '#334155', color: '#CBD5E1' }}
-            title="Reset code template"
-          >
-            <RotateCcw size={13} />
-            <span>Reset</span>
-          </button>
-
-          <button
-            onClick={handleRunCode}
-            disabled={isRunning || isTimeExpired}
-            className="btn-primary"
-            style={{ padding: '0.4rem 1.25rem', fontSize: '0.82rem', gap: '6px', fontWeight: 800 }}
-          >
-            <Play size={13} fill="currentColor" />
-            <span>{isTimeExpired ? 'Assessment Expired' : isRunning ? 'Executing Tests...' : 'Run Test Cases'}</span>
-          </button>
         </div>
       </div>
 
@@ -1084,14 +1166,17 @@ export const AssessmentEditorModal = ({ challenge, onClose }) => {
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: '1.2fr 0.8fr',
+          gridTemplateColumns: isCodingQuestion ? '1.2fr 0.8fr' : '1fr',
           gap: '1rem',
           flex: 1,
           minHeight: 0,
-          padding: '0.85rem 1.5rem 1.25rem'
+          padding: '0.85rem 1.5rem 1.25rem',
+          maxWidth: isCodingQuestion ? '100%' : '960px',
+          width: '100%',
+          margin: '0 auto'
         }}
       >
-        {/* LEFT: MONACO CODE EDITOR OR MCQ / PARAGRAPH QUESTION */}
+        {/* MAIN QUESTION WORKSPACE (MONACO EDITOR OR MCQ / PARAGRAPH QUESTION) */}
         <div
           style={{
             backgroundColor: '#0F172A',
@@ -1105,7 +1190,7 @@ export const AssessmentEditorModal = ({ challenge, onClose }) => {
         >
           <div
             style={{
-              padding: '0.45rem 1rem',
+              padding: '0.5rem 1.25rem',
               borderBottom: '1px solid #1E293B',
               backgroundColor: '#1E293B',
               display: 'flex',
@@ -1117,84 +1202,95 @@ export const AssessmentEditorModal = ({ challenge, onClose }) => {
               <span style={{ width: '10px', height: '10px', borderRadius: '50%', backgroundColor: '#EF4444' }} />
               <span style={{ width: '10px', height: '10px', borderRadius: '50%', backgroundColor: '#F59E0B' }} />
               <span style={{ width: '10px', height: '10px', borderRadius: '50%', backgroundColor: '#10B981' }} />
-              <span style={{ fontSize: '0.76rem', color: '#93C5FD', fontWeight: 700, fontFamily: 'var(--font-mono)', marginLeft: '6px' }}>
-                {activeQuestion ? `Question ${activeQuestionIndex + 1}: ${activeQuestion.title || activeQuestion.type.toUpperCase()}` : (currentLanguage.fileName || 'solution')} • Active Proctoring
+              <span style={{ fontSize: '0.78rem', color: '#93C5FD', fontWeight: 700, fontFamily: 'var(--font-mono)', marginLeft: '6px' }}>
+                {activeQuestion ? `Question ${activeQuestionIndex + 1}: ${activeQuestion.title || (activeQuestion.type === 'mcq' ? 'Multiple Choice' : activeQuestion.type === 'coding' ? 'Coding Problem' : 'Descriptive Question')}` : (currentLanguage.fileName || 'solution')} • Active Proctoring
               </span>
             </div>
-            {(!activeQuestion || activeQuestion.type === 'coding') && (
+            {isCodingQuestion ? (
               <button onClick={handleCopyCode} className="btn-icon" style={{ color: '#94A3B8' }} title="Copy Code">
                 {copied ? <Check size={12} color="#34D399" /> : <Copy size={12} />}
               </button>
+            ) : (
+              <span style={{ fontSize: '0.74rem', color: '#CBD5E1', fontWeight: 700, backgroundColor: 'rgba(255,255,255,0.08)', padding: '2px 8px', borderRadius: '6px' }}>
+                {activeQuestion?.marks ? `${activeQuestion.marks} Marks` : '5 Marks'}
+              </span>
             )}
           </div>
 
           {activeQuestion?.type === 'mcq' ? (
-            <div style={{ flex: 1, padding: '1.25rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-              <div style={{ fontSize: '1rem', fontWeight: 700, color: '#F8FAFC', lineHeight: 1.5 }}>
+            <div style={{ flex: 1, padding: '1.75rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+              <div style={{ fontSize: '1.1rem', fontWeight: 700, color: '#F8FAFC', lineHeight: 1.6 }}>
                 {activeQuestion.prompt}
               </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                 {(activeQuestion.options || []).map((opt, optIdx) => {
-                  const isSelected = Number(questionAnswers[activeQuestion.id]) === optIdx;
+                  const qId = getQuestionId(activeQuestion, activeQuestionIndex);
+                  const isSelected = Number(questionAnswers[qId]) === optIdx;
                   return (
                     <label
                       key={optIdx}
-                      onClick={() => setQuestionAnswers((prev) => ({ ...prev, [activeQuestion.id]: optIdx }))}
+                      onClick={() => setQuestionAnswers((prev) => ({ ...prev, [qId]: optIdx }))}
                       style={{
                         display: 'flex',
                         alignItems: 'center',
-                        gap: '0.75rem',
-                        padding: '0.75rem 1rem',
+                        gap: '0.85rem',
+                        padding: '0.85rem 1.15rem',
                         borderRadius: '10px',
                         border: isSelected ? '1.5px solid #3B82F6' : '1px solid #334155',
                         backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.15)' : '#1E293B',
                         cursor: 'pointer',
                         color: isSelected ? '#60A5FA' : '#F1F5F9',
                         fontWeight: isSelected ? 700 : 500,
-                        fontSize: '0.9rem'
+                        fontSize: '0.92rem',
+                        transition: 'all 0.15s ease'
                       }}
                     >
                       <input
                         type="radio"
-                        name={`exam_ans_${activeQuestion.id}`}
+                        name={`exam_ans_${qId}`}
                         checked={isSelected}
-                        onChange={() => setQuestionAnswers((prev) => ({ ...prev, [activeQuestion.id]: optIdx }))}
-                        style={{ cursor: 'pointer' }}
+                        onChange={() => setQuestionAnswers((prev) => ({ ...prev, [qId]: optIdx }))}
+                        style={{ cursor: 'pointer', width: '16px', height: '16px' }}
                       />
-                      <span>{String.fromCharCode(65 + optIdx)}: {opt}</span>
+                      <span><strong>{String.fromCharCode(65 + optIdx)}:</strong> {opt}</span>
                     </label>
                   );
                 })}
               </div>
             </div>
           ) : (activeQuestion?.type === 'paragraph' || activeQuestion?.type === 'descriptive') ? (
-            <div style={{ flex: 1, padding: '1.25rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-              <div style={{ fontSize: '1rem', fontWeight: 700, color: '#F8FAFC', lineHeight: 1.5 }}>
+            <div style={{ flex: 1, padding: '1.75rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              <div style={{ fontSize: '1.1rem', fontWeight: 700, color: '#F8FAFC', lineHeight: 1.6 }}>
                 {activeQuestion.prompt}
               </div>
               {activeQuestion.guidelines && (
-                <div style={{ fontSize: '0.8rem', color: '#F59E0B', fontStyle: 'italic' }}>
-                  Rubric: {activeQuestion.guidelines}
+                <div style={{ fontSize: '0.82rem', color: '#F59E0B', fontStyle: 'italic', padding: '0.5rem 0.75rem', borderRadius: '6px', backgroundColor: 'rgba(245, 158, 11, 0.08)', border: '1px solid rgba(245, 158, 11, 0.2)' }}>
+                  Evaluation Rubric: {activeQuestion.guidelines}
                 </div>
               )}
-              <textarea
-                rows={10}
-                value={questionAnswers[activeQuestion.id] || ''}
-                onChange={(e) => setQuestionAnswers((prev) => ({ ...prev, [activeQuestion.id]: e.target.value }))}
-                placeholder="Type your detailed answer and explanation here..."
-                style={{
-                  width: '100%',
-                  flex: 1,
-                  borderRadius: '10px',
-                  padding: '0.85rem',
-                  fontSize: '0.88rem',
-                  lineHeight: 1.6,
-                  backgroundColor: '#020617',
-                  color: '#F8FAFC',
-                  border: '1px solid #334155',
-                  resize: 'none'
-                }}
-              />
+              {(() => {
+                const qId = getQuestionId(activeQuestion, activeQuestionIndex);
+                return (
+                  <textarea
+                    rows={12}
+                    value={questionAnswers[qId] || ''}
+                    onChange={(e) => setQuestionAnswers((prev) => ({ ...prev, [qId]: e.target.value }))}
+                    placeholder="Type your detailed answer and explanation here..."
+                    style={{
+                      width: '100%',
+                      flex: 1,
+                      borderRadius: '10px',
+                      padding: '1rem',
+                      fontSize: '0.9rem',
+                      lineHeight: 1.6,
+                      backgroundColor: '#020617',
+                      color: '#F8FAFC',
+                      border: '1px solid #334155',
+                      resize: 'none'
+                    }}
+                  />
+                );
+              })()}
             </div>
           ) : (
             <div style={{ flex: 1, position: 'relative' }}>
@@ -1217,78 +1313,168 @@ export const AssessmentEditorModal = ({ challenge, onClose }) => {
               />
             </div>
           )}
-        </div>
 
-        {/* RIGHT: PROCTORED TEST OUTPUT TERMINAL */}
-        <div
-          style={{
-            backgroundColor: '#0F172A',
-            border: '1px solid #1E293B',
-            borderRadius: '12px',
-            display: 'flex',
-            flexDirection: 'column',
-            overflow: 'hidden',
-            boxShadow: '0 4px 16px rgba(0, 0, 0, 0.25)'
-          }}
-        >
-          <div
-            style={{
-              padding: '0.45rem 1rem',
-              borderBottom: '1px solid #1E293B',
-              backgroundColor: '#1E293B',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between'
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <Terminal size={14} color="#38BDF8" />
-              <span style={{ fontSize: '0.76rem', color: '#F8FAFC', fontWeight: 700 }}>Automated Verification Output</span>
-            </div>
-            {isPassed && (
-              <span
+          {/* Bottom Save & Next Question / Category Navigation Bar */}
+          {hasMultipleQuestions && (
+            <div
+              style={{
+                padding: '0.65rem 1.25rem',
+                borderTop: '1px solid #1E293B',
+                backgroundColor: '#1E293B',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '0.75rem',
+                flexWrap: 'wrap'
+              }}
+            >
+              <button
+                onClick={() => handleSaveAndNavigate(activeQuestionIndex - 1)}
+                disabled={activeQuestionIndex === 0}
+                className="btn-secondary"
                 style={{
-                  fontSize: '0.7rem',
-                  fontWeight: 800,
-                  padding: '2px 8px',
-                  borderRadius: '4px',
-                  backgroundColor: '#064E3B',
-                  color: '#34D399',
-                  display: 'flex',
+                  padding: '0.4rem 0.85rem',
+                  fontSize: '0.8rem',
+                  display: 'inline-flex',
                   alignItems: 'center',
-                  gap: '4px'
+                  gap: '0.35rem',
+                  opacity: activeQuestionIndex === 0 ? 0.4 : 1,
+                  cursor: activeQuestionIndex === 0 ? 'not-allowed' : 'pointer',
+                  backgroundColor: '#0F172A',
+                  borderColor: '#334155',
+                  color: '#CBD5E1'
                 }}
               >
-                <Check size={12} strokeWidth={3} />
-                <span>ALL TESTS PASSED</span>
-              </span>
-            )}
-          </div>
+                <ChevronLeft size={15} />
+                <span>Previous Question</span>
+              </button>
 
+              <div style={{ fontSize: '0.78rem', color: '#94A3B8', fontWeight: 600 }}>
+                Question <strong style={{ color: '#F8FAFC' }}>{activeQuestionIndex + 1}</strong> of <strong style={{ color: '#F8FAFC' }}>{challenge.questions.length}</strong>
+                {activeQuestion?.marks && ` • ${activeQuestion.marks} Marks`}
+              </div>
+
+              {activeQuestionIndex < challenge.questions.length - 1 ? (
+                <button
+                  onClick={() => handleSaveAndNavigate(activeQuestionIndex + 1)}
+                  className="btn-primary"
+                  style={{
+                    padding: '0.45rem 1.1rem',
+                    fontSize: '0.82rem',
+                    fontWeight: 700,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.4rem',
+                    backgroundColor: '#2563EB',
+                    borderColor: '#2563EB'
+                  }}
+                >
+                  <span>
+                    {(() => {
+                      const nextQ = challenge.questions[activeQuestionIndex + 1];
+                      if (activeQuestion && nextQ && activeQuestion.type !== nextQ.type) {
+                        const typeNames = { mcq: 'MCQ Section', paragraph: 'Descriptive Section', descriptive: 'Descriptive Section', coding: 'Coding Section' };
+                        return `Save & Continue to ${typeNames[nextQ.type] || 'Next Category'} →`;
+                      }
+                      return 'Save & Next Question →';
+                    })()}
+                  </span>
+                </button>
+              ) : (
+                <button
+                  onClick={() => setShowSubmitConfirm(true)}
+                  className="btn-primary"
+                  style={{
+                    padding: '0.45rem 1.2rem',
+                    fontSize: '0.82rem',
+                    fontWeight: 800,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.4rem',
+                    backgroundColor: '#059669',
+                    borderColor: '#059669'
+                  }}
+                >
+                  <Check size={14} />
+                  <span>Review & Finish Assessment</span>
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* RIGHT: PROCTORED TEST OUTPUT TERMINAL (Only rendered for coding questions!) */}
+        {isCodingQuestion && (
           <div
             style={{
-              flex: 1,
-              padding: '1rem',
-              fontFamily: 'var(--font-mono)',
-              fontSize: '0.8rem',
-              lineHeight: 1.6,
-              color: isPassed ? '#34D399' : '#CBD5E1',
-              overflowY: 'auto',
-              whiteSpace: 'pre-wrap',
-              backgroundColor: '#050B17'
+              backgroundColor: '#0F172A',
+              border: '1px solid #1E293B',
+              borderRadius: '12px',
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden',
+              boxShadow: '0 4px 16px rgba(0, 0, 0, 0.25)'
             }}
           >
-            {output || (
-              <div style={{ color: '#64748B', display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '1rem' }}>
-                <div>$ ready for test execution.</div>
-                <div>$ click [Run Test Cases] to compile and validate in an isolated sandbox.</div>
-                <div style={{ fontSize: '0.74rem', color: '#475569' }}>
-                  Anti-cheat validation will verify execution output against hidden test assertions.
-                </div>
+            <div
+              style={{
+                padding: '0.45rem 1rem',
+                borderBottom: '1px solid #1E293B',
+                backgroundColor: '#1E293B',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between'
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <Terminal size={14} color="#38BDF8" />
+                <span style={{ fontSize: '0.76rem', color: '#F8FAFC', fontWeight: 700 }}>Automated Verification Output</span>
               </div>
-            )}
+              {isPassed && (
+                <span
+                  style={{
+                    fontSize: '0.7rem',
+                    fontWeight: 800,
+                    padding: '2px 8px',
+                    borderRadius: '4px',
+                    backgroundColor: '#064E3B',
+                    color: '#34D399',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px'
+                  }}
+                >
+                  <Check size={12} strokeWidth={3} />
+                  <span>ALL TESTS PASSED</span>
+                </span>
+              )}
+            </div>
+
+            <div
+              style={{
+                flex: 1,
+                padding: '1rem',
+                fontFamily: 'var(--font-mono)',
+                fontSize: '0.8rem',
+                lineHeight: 1.6,
+                color: isPassed ? '#34D399' : '#CBD5E1',
+                overflowY: 'auto',
+                whiteSpace: 'pre-wrap',
+                backgroundColor: '#050B17'
+              }}
+            >
+              {output || (
+                <div style={{ color: '#64748B', display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '1rem' }}>
+                  <div>$ ready for test execution.</div>
+                  <div>$ click [Run Test Cases] to compile and validate in an isolated sandbox.</div>
+                  <div style={{ fontSize: '0.74rem', color: '#475569' }}>
+                    Anti-cheat validation will verify execution output against hidden test assertions.
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
       {/* ─── Submit Confirmation Modal Dialog ────────────────────────────── */}

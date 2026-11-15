@@ -467,13 +467,21 @@ router.get('/tests', async (req, res) => {
         }
       } else {
         const examDate = new Date(exam.date);
-        const examEnd = new Date(examDate.getTime() + (exam.durationMinutes || 60) * 60000);
-        if (now > examEnd) {
-          lifecycleStatus = 'Missed';
-        } else if (now >= examDate) {
-          lifecycleStatus = 'Available';
-        } else {
+        if (isNaN(examDate.getTime())) {
           lifecycleStatus = 'Upcoming';
+        } else {
+          // Normalize to whole calendar day comparison so test is available all day on scheduled date
+          const startOfExamDay = new Date(examDate.getFullYear(), examDate.getMonth(), examDate.getDate(), 0, 0, 0, 0).getTime();
+          const endOfExamDay = new Date(examDate.getFullYear(), examDate.getMonth(), examDate.getDate(), 23, 59, 59, 999).getTime();
+          const nowMs = now.getTime();
+
+          if (nowMs < startOfExamDay) {
+            lifecycleStatus = 'Upcoming';
+          } else if (nowMs <= endOfExamDay) {
+            lifecycleStatus = 'Available';
+          } else {
+            lifecycleStatus = 'Missed';
+          }
         }
       }
 
@@ -491,6 +499,8 @@ router.get('/tests', async (req, res) => {
         durationMinutes: exam.durationMinutes || 45,
         isCodingExam: exam.isCodingExam ?? true,
         status: lifecycleStatus,
+        day: lifecycleStatus === 'Available' ? 'Active Today' : (lifecycleStatus === 'Upcoming' ? 'Upcoming' : (lifecycleStatus === 'Missed' ? 'Concluded' : lifecycleStatus)),
+        isAvailableToday: lifecycleStatus === 'Available',
         score: att?.score ?? null,
         percentage: att?.percentage ?? null,
         timeUsedMinutes: att?.timeUsedMinutes ?? null,
